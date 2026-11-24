@@ -1,0 +1,1486 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>人材スキルマップ</title>
+<script src="https://unpkg.com/force-graph@1.43.5/dist/force-graph.min.js"></script>
+<style>
+/* 色は変数にまとめ、PCの表示設定（ダークモード／ライトモード）に合わせて切り替える（2026-11-13、富田依頼）。
+   図の中（点・線・ラベル）の色は、画面スクリプトの THEMES が同じ切り替えをする。 */
+:root {
+  color-scheme: dark;
+  --bg: #1e1e1e; --card: rgba(38,38,38,.82); --line: rgba(255,255,255,.08); --text: #dcddde; --muted: #8a8a8a;
+  --faint: #5c5c5c; --accent: #a88bfa; --match: #ffd166;
+  --field: rgba(0,0,0,.25); --hover: rgba(255,255,255,.06); --strong: #fff; --grip: rgba(255,255,255,.2);
+  --accent-soft: rgba(168,139,250,.2); --accent-mid: rgba(168,139,250,.28); --accent-line: rgba(168,139,250,.5);
+  --lack: #f28b82; --sw: #444; --knob: #bbb; --shadow: rgba(0,0,0,.35);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f6f6f7; --card: rgba(255,255,255,.88); --line: rgba(0,0,0,.12); --text: #26262b; --muted: #66666e;
+    --faint: #9a9aa2; --accent: #6d4fd6; --match: #b97a00;
+    --field: rgba(0,0,0,.04); --hover: rgba(0,0,0,.06); --strong: #1b1b1f; --grip: rgba(0,0,0,.22);
+    --accent-soft: rgba(109,79,214,.12); --accent-mid: rgba(109,79,214,.18); --accent-line: rgba(109,79,214,.45);
+    --lack: #c5221f; --sw: #c9c9cf; --knob: #fff; --shadow: rgba(0,0,0,.14);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+  font: 13px/1.5 Inter, system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+#graph { position: fixed; inset: 0; }
+.card { position: fixed; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 8px 30px var(--shadow); }
+/* 小窓は「幅を変えるつまみ（.grip）」と「スクロールする中身（.body）」に分ける。つまみを中身と一緒に流さないため。 */
+.card { display: flex; }
+.card > .body { flex: 1; min-width: 0; overflow-y: auto; position: relative; }
+.grip { position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; z-index: 2; touch-action: none; }
+.grip::after { content: ""; position: absolute; top: 50%; left: 4px; width: 2px; height: 40px; margin-top: -20px;
+  border-radius: 1px; background: var(--grip); }
+.grip:hover::after, .grip.drag::after { background: var(--accent); }
+#ctrl .grip { right: -5px; }
+#info .grip { left: -5px; }
+#ctrl { top: 16px; left: 16px; width: 260px; max-height: calc(100vh - 32px); }
+#ctrl > .body { padding: 14px; }
+.seg { display: flex; gap: 2px; margin-top: 6px; padding: 2px; border-radius: 7px; background: var(--field);
+  border: 1px solid var(--line); }
+.seg button { flex: 1; border: 0; background: none; color: var(--muted); padding: 4px 2px; border-radius: 5px;
+  cursor: pointer; font-size: 12px; white-space: nowrap; }
+.seg button.on { background: var(--accent-mid); color: var(--strong); }
+.seg button[disabled] { opacity: .45; cursor: default; }
+.seg small { opacity: .7; }
+.layers { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.layer { border: 1px solid var(--line); background: none; color: var(--faint); padding: 2px 8px; border-radius: 10px;
+  cursor: pointer; font-size: 11.5px; text-decoration: line-through; }
+.layer.on { background: var(--accent-soft); color: var(--text); border-color: var(--accent-line); text-decoration: none; }
+.layer.none { opacity: .4; }
+#modeInfo { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+.sheet { margin: 0 0 10px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--accent-line);
+  background: var(--accent-soft); color: var(--strong); cursor: pointer; font-size: 12px; }
+.sheet:hover { background: var(--accent-mid); }
+.nosheet { color: var(--faint); font-size: 11.5px; margin-bottom: 10px; }
+#ctrl h1 { font-size: 14px; font-weight: 600; margin: 0 0 2px; letter-spacing: .02em; }
+#ctrl .meta { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+#q { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--field);
+  color: var(--text); font-size: 13px; outline: none; }
+#q:focus, #pj:focus { border-color: var(--accent); }
+#pj { width: 100%; margin-top: 6px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--field); color: var(--text); font: inherit; font-size: 12.5px; outline: none; resize: vertical; }
+#pjInfo { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+.link { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 4px 0 0; }
+.link[disabled] { color: var(--muted); cursor: default; }
+#pjFilter { width: 100%; margin-top: 6px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--field); color: var(--text); font-size: 12px; outline: none; }
+#pjItems { max-height: 190px; overflow-y: auto; margin-top: 4px; border: 1px solid var(--line); border-radius: 6px; }
+#pjItems .pj { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+  background: none; color: var(--text); padding: 5px 8px; cursor: pointer; font-size: 12px; }
+#pjItems .pj:hover { background: var(--hover); }
+#pjItems .pj small, #pjItems .note { color: var(--muted); font-size: 11px; }
+#pjItems .note { padding: 6px 8px; }
+#pjInfo .chip { cursor: default; }
+#pjInfo .clear { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 11.5px; padding: 0; }
+.rank { display: inline-block; min-width: 1.6em; color: var(--match); font-weight: 600; }
+.near { color: var(--muted); }
+.lack { color: var(--lack); }
+.sec { margin-top: 14px; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+.toggle { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; cursor: pointer; }
+.toggle input { display: none; }
+.toggle .sw { width: 28px; height: 16px; border-radius: 8px; background: var(--sw); position: relative; transition: .2s; }
+.toggle .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--knob); transition: .2s; }
+.toggle input:checked + .sw { background: var(--accent); }
+.toggle input:checked + .sw::after { left: 14px; background: #fff; }
+.grp { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; margin-top: 2px; border: 0;
+  border-radius: 5px; background: none; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; }
+.grp:hover, .grp.on { background: var(--hover); }
+.grp .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.grp .n { margin-left: auto; color: var(--faint); white-space: nowrap; }
+#info > .body { padding: 16px; }
+#info { top: 16px; right: 16px; width: 320px; max-height: calc(100vh - 32px);
+  opacity: 0; transform: translateX(12px); pointer-events: none; transition: opacity .2s, transform .2s; }
+#info.show { opacity: 1; transform: none; pointer-events: auto; }
+#info h2 { margin: 0; font-size: 16px; font-weight: 600; }
+#info .sub { color: var(--muted); margin-bottom: 10px; }
+#info .close { position: absolute; top: 10px; right: 12px; border: 0; background: none; color: var(--muted);
+  font-size: 18px; cursor: pointer; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
+dt { color: var(--muted); } dd { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.chip { padding: 1px 7px; border-radius: 10px; background: var(--hover); font-size: 11.5px; cursor: pointer; }
+.chip:hover { background: var(--accent-mid); }
+.nb { display: block; width: 100%; text-align: left; border: 0; background: none; color: var(--text);
+  padding: 7px 6px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.nb:hover { background: var(--hover); }
+.nb small { color: var(--muted); }
+.bar { height: 2px; border-radius: 1px; background: var(--accent); margin: 4px 0 2px; opacity: .7; }
+.hint { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); color: var(--faint); font-size: 11px;
+  pointer-events: none; white-space: nowrap; }
+@media (max-width: 760px) {
+  #ctrl { width: auto; right: 16px; max-height: 38vh; }
+  #info { top: auto; bottom: 16px; left: 16px; right: 16px; width: auto; max-height: 45vh; }
+  .hint, .grip { display: none; }
+}
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<div id="ctrl" class="card"><div class="grip" title="ドラッグで幅を変える"></div><div class="body">
+  <h1>人材スキルマップ</h1>
+  <div class="meta" id="meta"></div>
+  <input type="search" id="q" placeholder="検索（Go、T0019、PMO…）">
+  <label class="toggle"><span>スキルを点で表示</span><input type="checkbox" id="hubs"><span class="sw"></span></label>
+  <label class="toggle"><span>ラベルを常に表示</span><input type="checkbox" id="labels"><span class="sw"></span></label>
+  <div class="sec">絞り込み（カテゴリ・レイヤー）</div>
+  <div class="seg" id="catSeg"></div>
+  <div class="layers" id="layerChips"></div>
+  <div class="sec">案件から探す</div>
+  <textarea id="pj" rows="3" placeholder="案件の募集要項か、必要なスキルを貼り付け（例: React, TypeScript, AWS）"></textarea>
+  <button class="link" id="pjPick" hidden>DB_projectから選ぶ</button>
+  <div id="pjList" hidden>
+    <input type="search" id="pjFilter" placeholder="件名・会社名・スキルで絞り込む">
+    <div id="pjItems"></div>
+  </div>
+  <div id="pjInfo"></div>
+  <div class="sec">グループの分け方</div>
+  <div class="seg" id="modeSeg"></div>
+  <div id="modeInfo"></div>
+  <div class="sec">グループ</div>
+  <div id="groups"></div>
+</div></div>
+<div id="info" class="card"><div class="grip" title="ドラッグで幅を変える"></div><div class="body" id="infoBody"></div></div>
+<div class="hint" id="hint">スクロールで拡大・ドラッグで移動・点をダブルクリックでスキルシート・案件を貼ると合う人が光る</div>
+<div class="hint" id="empty" style="bottom:50%;font-size:14px" hidden></div>
+<script>
+// ==== LOGIC:BEGIN（近さの計算。画面に依存しない。テストはここだけを Node.js で動かす） ====
+// なぜこう作っているか:
+// - 近さは、人材情報の解析（SPEC-007）が埋める tech_stack・scopes・main_position から測る。本文は読まない。
+//   解析が済んでいない人材は、比べる材料が無いので載せない。
+// - JS・SQL・要件定義のように「ほぼ全員が持っている」項目で全員がつながると塊が見えなくなるため、
+//   持っている人が少ない項目ほど重く数える（IDF重み付きのJaccard）。
+// - 線は人ごとに近い上位K人だけを引く。全ペアを引くと線だらけで読めないため。
+// - 同じ名前のスキルを数えるだけだと、React の人と Vue の人は「共通なし」になり、逆にスキルを20個並べた人を
+//   介して RoR の人と VBA の人が同じ塊になる（2026-11-10、富田指摘）。そこで、スキルを「系統」（SKILL_FAMILIES。
+//   Webフロント、Microsoft系の業務開発 など）にまとめ、その人のスキルのうち各系統が占める割合どうしも比べる。
+//   割合で比べるので、20個のうち1個だけ VBA がある人は、VBA が中心の人とはあまり近くならない。
+// - 塊（グループ）はラベル伝播で決め、その塊に多い系統と、その系統の中で多いスキルを名前にする
+//   （「Webフロント（React・Vue）」）。名前で思い出せるようにするため。
+// - 表記ゆれ（Next.js／Next、Oracle DB／Oracle19c など）は、ここで代表表記に寄せる。寄せないと同じスキルが
+//   別物として数えられ、近い人が近くに来ない。00_config.gs の SKILL_ABBREVIATIONS で寄せきれていないものを補う。
+// - 計算をブラウザ側に置いているのは、Webアプリ（開くたびにシートを読む）と、CSVから作るHTML
+//   （src/run_talent_map.py）で、同じ計算を二重に持たないため。
+const TalentMap = (() => {
+  // 近さの内訳の重み。技術を主にし（同じスキル＋同じ系統）、業務スコープ（工程）と主な役職で補う。
+  // 系統を同じスキルより重くしているのは、「同じ系統の別スキル」（React と Vue）の人を近づけるため。
+  const WEIGHT_SKILL = 0.3, WEIGHT_FAMILY = 0.4, WEIGHT_SCOPE = 0.2, WEIGHT_POSITION = 0.1;
+  // 人ごとに線を引く近い人の数と、線を引く近さの下限。
+  const TOP_K = 3, MIN_SIMILARITY = 0.12;
+  // スキルの点として表示する、持っている人の下限。
+  const HUB_MIN_COUNT = 3;
+  const LABEL_PROPAGATION_ROUNDS = 30;
+  // 配置の計算（画面側の Graph が使う）。描く前に先に計算しておく回数と、そのあと動いてよい時間（ミリ秒）。
+  // 先に計算しておく回数は0にし、点が広がって落ち着くまでの動きを見せる（2026-11-19、富田指示。
+  // 11-18 に300回先に計算して動きを消したが、動きがあるほうがよいとのこと）。
+  const LAYOUT_WARMUP_TICKS = 0, LAYOUT_COOLDOWN_MS = 8000;
+  // この人数以下の塊は、いちばん強くつながる隣の塊に入れる（塊が細かすぎると色で覚えられないため）。
+  const SMALL_CLUSTER_SIZE = 2;
+  // 道具（チケット管理・チャット・エディタ・OS）は、誰が持っていても仕事の中身を表さない。近さでは軽く数え、
+  // 塊の名前には使わない。HTML・CSS・JS・SQL は仕事の中身ではあるが、ほぼ全員が持つため名前には使わない。
+  const GENERIC_TOOLS = new Set([
+    "Git", "GitHub", "GitLab", "Backlog", "JIRA", "Redmine", "Slack", "Chatwork", "Notion", "Zoom", "Google Meet",
+    "Windows", "macOS", "VSCode", "Visual Studio", "Tera Term", "Trello", "Dropbox", "Miro", "Box",
+    "ChatGPT", "Claude Code", "Gemini", "Cursor", "Office365", "WinMerge", "SVN",
+  ]);
+  const GENERIC_TOOL_WEIGHT = 0.3;
+  const NAME_EXCLUDE = new Set([...GENERIC_TOOLS, "HTML", "CSS", "JS", "SQL"]);
+
+  // スキルの系統（代表表記で書く）。同じ系統のスキルは「近い」と数える。分け方の考え方:
+  // - 案件で「この経験があれば振れる」と言える範囲を1つの系統にする。言語が似ているかではなく、仕事が近いかで分ける。
+  //   VB.NET（業務システム開発）と VBA（Excel等の自動化）は別の系統（2026-11-10、富田確認）。
+  // - JS・TS・SQL と道具（GENERIC_TOOLS）は、どの仕事にも出てくるので系統に入れない。HTML・CSS は Webフロントに入れる
+  //   （持っている人が多いが、割合で比べるので、20個のうち2個の人はフロント寄りにはならない）。
+  // - ここに無いスキルは系統なしで、同じ名前のスキルとしてだけ数える。足すときは代表表記（ALIASES の値）で書く。
+  const SKILL_FAMILIES = {
+    "Webフロント": ["HTML", "CSS", "React", "Vue", "Angular", "Next", "Nuxt", "Svelte", "SolidJS", "jQuery", "Sass", "Tailwind CSS",
+      "TailWind", "Bootstrap", "Astro", "Redux", "Vuetify", "Material UI", "TanStack Query"],
+    "Node系": ["Node", "Express", "NestJS", "Hono", "Prisma", "TypeORM", "GraphQL"],
+    "Ruby系": ["Ruby", "RoR", "Hotwire", "Stimulus.js"],
+    "PHP系": ["PHP", "Laravel", "CakePHP", "Symfony", "FuelPHP", "CodeIgniter", "Zend Framework", "Kohana", "Twig"],
+    "Python系": ["Python", "Django", "Flask", "FastAPI", "SQLAlchemy"],
+    "Java系": ["Java", "Spring", "Struts", "Struts2", "Seaser2", "SAStruts2", "JSP", "Java Servlet", "Thymeleaf",
+      "EJB", "Scala"],
+    "Go・Rust": ["Go", "Gin", "Gorm", "Revel", "gRPC", "Rust", "Axum"],
+    "Microsoft系の業務開発": ["C#", "VB.NET", "VB", "ASP.NET", ".NET", "WPF", "Xamarin", "EF Core", "Radzen Blazor",
+      "ASP", "T-SQL"],
+    "Office自動化・ローコード": ["VBA", "GAS", "RPA", "WinActor", "UiPath", "kintone", "Power Platform", "n8n", "Dify",
+      "MS-Access", "EzAvater", "Mendix", "OutSystems"],
+    "モバイル": ["Swift", "Kotlin", "Objective-C", "Flutter", "Dart", "React Native", "SwiftUI", "UIKit",
+      "Jetpack Compose", "RxSwift", "RxKotlin", "KMP", "Android", "iOS"],
+    "クラウド": ["AWS", "GCP", "Azure", "Terraform", "Docker", "k8s", "Cloudflare", "Vercel", "Supabase", "Firebase",
+      "Heroku", "Fly.io", "GitHub Actions", "Jenkins"],
+    "サーバ・インフラ": ["Linux", "Windows Server", "RHEL", "Ubuntu", "CentOS", "UNIX", "Solaris", "Debian", "VMware",
+      "Microsoft Hyper-V", "JP1", "Zabbix", "Active Directory", "Shell", "PowerShell", "VBScript", "HULFT",
+      "NetBackup", "WSUS", "DNS", "LDAP", "Intune", "Arcserve"],
+    "データベース": ["Postgres", "MySQL", "Oracle", "SQLServer", "MariaDB", "DB2", "MongoDB", "Redis", "SQLite",
+      "PL/SQL", "DynamoDB", "Aurora"],
+    "データ基盤・分析": ["BigQuery", "Snowflake", "Redshift", "Databricks", "Tableau", "Power BI", "Looker",
+      "Looker Studio", "R", "SAS", "PySpark", "Glue", "S3", "TROCCO", "Qlik Sense", "Streamlit", "Delta Lake",
+      "Google Analytics", "Adobe Analytics", "GTM"],
+    "AI・LLM": ["LangChain", "LlamaIndex", "RAG", "Mastra", "OpenCV", "ChatGPT API", "Whisper", "AI", "pgvector",
+      "ChromaDB", "MCP", "Tensorflow.js"],
+    "ホスト・レガシー": ["COBOL", "PL/I", "JCL", "IBMホスト", "日立ホスト", "VOS3", "TSO", "IMSDB", "HiRDB", "Delphi",
+      "ColdFusion", "Perl", "IBM Notes", "Lotus Notes", "Lotus Script", "PowerBuilder"],
+    "C/C++・組込み": ["C", "C++", "MATLAB", "Simulink", "Stateflow", "CANalyzer", "CAPL", "Qt", "Raspberry Pi",
+      "Verilog-HDL"],
+    "ゲーム": ["Unity", "UnrealEngine", "Unreal Engine", "UE4", "UE5", "UE3"],
+    "デザイン・Web制作": ["Figma", "Photoshop", "Illustrator", "Adobe XD", "WordPress", "After Effects", "Canva Pro",
+      "Studio", "Movable Type", "Adobe InDesign", "Premiere Pro", "Lottie"],
+    "SaaS・業務パッケージ": ["Salesforce", "SAP ERP", "ABAP", "ServiceNow", "HubSpot", "CRM", "MA", "SFA", "Shopify",
+      "Zendesk", "SharePoint", "KARTE", "CDP"],
+    "マーケティング": ["SEO", "Google広告", "Yahoo!広告", "Meta広告", "LPO", "Semrush", "Ahrefs",
+      "Google Search Console", "ヒートマップ"],
+  };
+  const FAMILY_OF = new Map();
+  Object.keys(SKILL_FAMILIES).forEach((family) => SKILL_FAMILIES[family].forEach((skill) => FAMILY_OF.set(skill, family)));
+  // 実装をしない人（PM・コンサル・ディレクター）どうしを近づけるための、スキルに依らない系統。
+  // これが無いと、技術スキルを持たない人は工程と役職だけで比べることになり、たまたま工程が似たエンジニアの塊に散らばる。
+  const MANAGEMENT_FAMILY = "企画・マネジメント";
+  const MANAGEMENT_SHARE = 0.5;
+  const IMPLEMENT_SCOPE = "実装";
+  // 実装が無いだけでは足さない（インフラの運用・構築の人も実装が無いため）。次の業務スコープを2つ以上持つ人に限る。
+  const MANAGEMENT_SCOPES = new Set(["PM", "PMO", "コンサル", "事業企画", "プリセールス"]);
+  /** スキル（代表表記）の系統。系統に入れていないスキルは空文字。 */
+  const familyOf = (skill) => FAMILY_OF.get(skill) || "";
+
+  // 小文字・空白と . - _ 抜きにしたキー → 代表表記（複数に分けるものは配列）。
+  const ALIASES = {
+    "go": "Go", "golang": "Go", "ts": "TS", "typescript": "TS", "js": "JS", "javascript": "JS",
+    "ts/js": ["TS", "JS"], "html": "HTML", "html5": "HTML", "css": "CSS", "css3": "CSS", "css20": "CSS",
+    "scss": "Sass", "sass": "Sass", "html/css": ["HTML", "CSS"], "html&css": ["HTML", "CSS"],
+    "css/scss": ["CSS", "Sass"], "next": "Next", "nuxt": "Nuxt", "vue": "Vue", "vue2/vuex": "Vue", "react": "React",
+    "angular": "Angular", "angular2": "Angular", "angularjs": "Angular", "node": "Node", "nest": "NestJS",
+    "nestjs": "NestJS", "hono": "Hono", "jquery": "jQuery", "express": "Express", "ror": "RoR", "rubyonrails": "RoR",
+    "rails": "RoR", "spring": "Spring", "springboot": "Spring", "laravel": "Laravel", "cakephp": "CakePHP",
+    "django": "Django", "flask": "Flask", "fastapi": "FastAPI", "flutter": "Flutter", "c言語": "C", "c": "C",
+    "c++": "C++", "vc++": "C++", "c#": "C#", "c#net": "C#", "c#(net)": "C#", "vbnet": "VB.NET",
+    "vbnet/c#": ["VB.NET", "C#"], "vb": "VB", "vb6": "VB", "msvb": "VB", "net": ".NET", "netframework": ".NET",
+    "aspnet": "ASP.NET", "aspnetmvc": "ASP.NET", "aspnetwebforms": "ASP.NET", "vba": "VBA", "excelvba": "VBA",
+    "accessvba": "VBA", "vba/access": "VBA", "pl/1": "PL/I", "pl1": "PL/I", "shell": "Shell", "shellscript": "Shell",
+    "bash": "Shell", "postgres": "Postgres", "postgresql": "Postgres", "oracle": "Oracle", "oracledb": "Oracle",
+    "oracledatabase": "Oracle", "oracledatabase12c": "Oracle", "oracle19c": "Oracle", "oracle8": "Oracle",
+    "oraclesql": "Oracle", "sqlserver": "SQLServer", "microsoftsqlserver": "SQLServer", "mysql": "MySQL",
+    "mariadb": "MariaDB", "mariadb(mysql)": "MariaDB", "db2": "DB2", "mongodb": "MongoDB", "redis": "Redis",
+    "sqlite": "SQLite", "sqlite3": "SQLite", "aws": "AWS", "amazonwebservices": "AWS", "awscdk": "AWS", "gcp": "GCP",
+    "googlecloud": "GCP", "googlecloudplatform": "GCP", "azure": "Azure", "microsoftazure": "Azure",
+    "redshift": "Redshift", "awsredshift": "Redshift", "bigquery": "BigQuery", "snowflake": "Snowflake",
+    "databricks": "Databricks", "databricksonaws": "Databricks", "k8s": "k8s", "kubernetes": "k8s",
+    "docker": "Docker", "terraform": "Terraform", "linux": "Linux", "windows": "Windows", "windows系": "Windows",
+    "windows10": "Windows", "windows11": "Windows", "windows7/10/11": "Windows", "windowsserver": "Windows Server",
+    "unix": "UNIX", "unixsolaris": "Solaris", "rhel": "RHEL", "linux(redhat)": "RHEL", "git": "Git",
+    "git・github": ["Git", "GitHub"], "github": "GitHub", "githubactions": "GitHub Actions",
+    "claudecode": "Claude Code", "chatgpt": "ChatGPT", "gemini": "Gemini", "powerbi": "Power BI",
+    "tableau": "Tableau", "looker": "Looker", "lookerstudio": "Looker Studio", "ga": "Google Analytics",
+    "ga4": "Google Analytics", "googleanalytics": "Google Analytics", "figma": "Figma", "photoshop": "Photoshop",
+    "adobephotoshop": "Photoshop", "illustrator": "Illustrator", "adobeillustrator": "Illustrator", "xd": "Adobe XD",
+    "adobexd": "Adobe XD", "wordpress": "WordPress", "jira": "JIRA", "backlog": "Backlog", "slack": "Slack",
+    "kotlin": "Kotlin", "swift": "Swift", "objectivec": "Objective-C", "java": "Java", "python": "Python",
+    "ruby": "Ruby", "php": "PHP", "perl": "Perl", "rust": "Rust", "scala": "Scala", "dart": "Dart", "cobol": "COBOL",
+    "sql": "SQL", "pl/sql": "PL/SQL", "abap": "ABAP", "powershell": "PowerShell", "salesforce": "Salesforce",
+    "n8n": "n8n", "gas": "GAS", "dify": "Dify", "rag": "RAG", "langchain": "LangChain", "vercel": "Vercel",
+    "supabase": "Supabase", "firebase": "Firebase", "cloudflare": "Cloudflare", "cloudflareworkers": "Cloudflare",
+    "jp1": "JP1", "vmware": "VMware", "vmwareesxi": "VMware",
+  };
+  const PAREN = /[（(][^()（）]*[)）]/g;
+  // 「AWS EC2」「Amazon RDS」のようにクラウドのサービス名が付いたものは、クラウド名に寄せる。
+  const CLOUD_PREFIX = /^(?:AWS|Amazon)\s+\S/i;
+  const GCP_PREFIX = /^GCP\s*[（(]/i;
+
+  /** 解析列の「[A, B(x, y), C]」形式を、括弧の中のカンマで切らずに分ける。 */
+  function splitList(value) {
+    let text = String(value == null ? "" : value).trim();
+    if (text.startsWith("[") && text.endsWith("]")) text = text.slice(1, -1);
+    const items = [];
+    let depth = 0, buf = "";
+    for (const ch of text) {
+      if (ch === "(" || ch === "（") depth++;
+      else if (ch === ")" || ch === "）") depth = Math.max(0, depth - 1);
+      if ((ch === "," || ch === "、") && depth === 0) { items.push(buf.trim()); buf = ""; continue; }
+      buf += ch;
+    }
+    items.push(buf.trim());
+    return items.filter((x) => x);
+  }
+
+  function aliasKey(text) {
+    let key = text.toLowerCase().replace(/[\s.\-_]/g, "");
+    // 「nextjs」「vuejs」「honojs」は「js」を取って同じものとみなす（「js」単体や「ts/js」はそのまま）。
+    if (key === "nodejs") return "node";
+    if (key.length > 4 && key.endsWith("js") && /[a-z]/.test(key[key.length - 3])) key = key.slice(0, -2);
+    return key;
+  }
+  const lookup = (key) => Object.prototype.hasOwnProperty.call(ALIASES, key) ? [].concat(ALIASES[key]) : null;
+
+  /** スキル1つを代表表記にする（分けるものは複数返す）。寄せ先が無いものは括弧を取った原文のまま。 */
+  function normalizeSkill(raw) {
+    const text = String(raw == null ? "" : raw).trim();
+    if (!text) return [];
+    const whole = lookup(aliasKey(text));
+    if (whole) return whole;
+    if (CLOUD_PREFIX.test(text)) return ["AWS"];
+    if (GCP_PREFIX.test(text)) return ["GCP"];
+    const stripped = text.replace(PAREN, "").trim() || text;
+    return lookup(aliasKey(stripped)) || [stripped];
+  }
+  function normalizeSkills(values) {
+    const seen = [];
+    values.forEach((raw) => normalizeSkill(raw).forEach((s) => { if (!seen.includes(s)) seen.push(s); }));
+    return seen;
+  }
+
+  /**
+   * シートの行（列名→値）から、地図に載せる人材を作る。
+   * 載せるのは id があり、tech_stack か scopes のどちらかが埋まっている（＝解析済みの）人材だけ。
+   * 既定では status が TRUE（営業中）の人材に限る。氏名（full_name）は、行に入っていれば持たせる
+   * （入れるかどうかは、行を渡す側＝Webアプリ・run_talent_map.py が決める）。
+   */
+  function talentsFromRows(rows, options) {
+    const includeInactive = !!(options && options.includeInactive);
+    const str = (v) => String(v == null ? "" : v).trim();
+    const talents = [];
+    rows.forEach((row) => {
+      const id = str(row.id);
+      if (!id) return;
+      if (!includeInactive && str(row.status).toUpperCase() !== "TRUE") return;
+      const tech = normalizeSkills(splitList(row.tech_stack));
+      const scopes = splitList(row.scopes);
+      if (!tech.length && !scopes.length) return;
+      const sheetUrl = str(row.skill_sheet).match(/https?:\/\/[^\s"'<>]+/);
+      talents.push({
+        id, role: str(row.role), name: str(row.full_name), top_position: str(row.top_position),
+        main_position: str(row.main_position), work_style: str(row.work_style),
+        available_from: str(row.available_from), scopes, tech,
+        ...layerOf(row.contract_type, row.affiliation_type, row.affiliation_level),
+        // 社外向けでは、サーバ（90_talent_map.gs）がレイヤーを4区分にして渡す（直か1社先かが分かる列は渡ってこない）。
+        ...(EXTERNAL_LAYERS.includes(str(row.external_layer)) ? { layer: str(row.external_layer) } : {}),
+        company: str(row.company),
+        skill_sheet: sheetUrl ? sheetUrl[0] : "", industries: parseIndustries(row.industries),
+      });
+    });
+    return talents;
+  }
+
+  // ---- カテゴリ・レイヤー（図に載せる人の絞り込みに使う） ----
+  // カテゴリ＝契約の形（contract_type 列。フリーランス／プロパー）。レイヤー＝DeFactoryから見て何社先か
+  // （affiliation_level 列。0＝弊社と直接）とカテゴリの組み合わせ（2026-11-11、富田指定の4つ）。
+  // 2社先以上の人と、列が空の人は「そのほか」にまとめる（4つのどれとも言えないため）。
+  const CATEGORIES = ["フリーランス", "プロパー"];
+  const CATEGORY_OF = { "個人事業主": "フリーランス", "社員": "プロパー" };
+  const OTHER_LAYER = "そのほか（2社先以上・未設定）";
+  const LAYERS = ["直フリーランス", "弊社プロパー", "1社先フリーランス", "1社先プロパー", OTHER_LAYER];
+  // 社外向けの図のレイヤー（2026-11-13、富田決定）。フリーランスは、直か1社先かを社外に見せないため1つにまとめる。
+  // 同じ読み替えを、サーバ側の talentMapExternalLayer_（90_talent_map.gs）も持つ（テストで照合している）。
+  const EXTERNAL_OTHER_LAYER = "その他";
+  const EXTERNAL_LAYERS = ["フリーランス", "1社先プロパー", "自社プロパー", EXTERNAL_OTHER_LAYER];
+  const EXTERNAL_LAYER_OF = { "直フリーランス": "フリーランス", "1社先フリーランス": "フリーランス", "弊社プロパー": "自社プロパー", "1社先プロパー": "1社先プロパー" };
+  const externalLayerOf = (layer) => EXTERNAL_LAYER_OF[layer] || EXTERNAL_OTHER_LAYER;
+  function layerOf(contractType, affiliationType, affiliationLevel) {
+    const str = (v) => String(v == null ? "" : v).trim();
+    const category = Object.prototype.hasOwnProperty.call(CATEGORY_OF, str(contractType)) ? CATEGORY_OF[str(contractType)] : "";
+    // affiliation_level が空でも、affiliation_type が「弊社」なら 0（直接）とみなす。
+    const level = /^\d+$/.test(str(affiliationLevel)) ? Number(str(affiliationLevel)) : (str(affiliationType) === "弊社" ? 0 : null);
+    if (!category || level === null || level > 1) return { category, layer: OTHER_LAYER };
+    if (level === 0) return { category, layer: category === "フリーランス" ? "直フリーランス" : "弊社プロパー" };
+    return { category, layer: `1社先${category}` };
+  }
+
+  // ---- 業界（グループの分け方「業界」に使う） ----
+  // 業界は all_talents の列に無く、「解析結果」タブのJSON（経歴の案件ごとの industry）にだけある。
+  // Webアプリ（90_talent_map.gs の talentMapIndustries）が、人ごとに「業界名:月数」を並べた文字列にして渡す。
+  // 業界名は経歴書の書き方のまま（「WEB制作」「生命保険」など）なので、ここで大きな区分に寄せる。
+  // 上から順に当て、最初に当たった区分にする（「医療系SaaS」は医療、「自動車保険」は金融）。
+  // 英字の語（EC・IT・HR など）は、前後が英字でないときだけ当てる（「TECH」から EC を拾わないため）。
+  const word = (w) => `(?:^|[^A-Za-z])(?:${w})(?![A-Za-z])`;
+  const INDUSTRY_GROUPS = [
+    ["金融・保険", new RegExp(`金融|銀行|証券|保険|クレジット|決済|信販|投資|資産運用|生保|損保|リース|暗号資産|仮想通貨|フィンテック|${word("FinTech")}`, "i")],
+    ["医療・ヘルスケア", /医療|病院|製薬|医薬|ヘルスケア|介護|薬局|福祉|カルテ|歯科|クリニック/],
+    ["公共・官公庁", /官公庁|公共|自治体|省庁|行政|官庁|独立行政法人|警察|防衛/],
+    ["製造・メーカー", /製造|メーカー|工場|自動車|車載|半導体|電機|機械|化学|素材|精密|重工|鉄鋼|家電|組込|組み込み/],
+    ["小売・EC", new RegExp(`小売|通販|流通|アパレル|百貨店|スーパー|コンビニ|ドラッグストア|卸|ファッション|Eコマース|${word("EC")}`, "i")],
+    ["通信", /通信|キャリア|テレコム|携帯/],
+    ["物流・運輸", /物流|運輸|倉庫|配送|鉄道|航空|交通|海運|運送|タクシー/],
+    ["不動産・建設", /不動産|建設|建築|住宅|ゼネコン/],
+    ["広告・メディア", new RegExp(`広告|メディア|出版|放送|テレビ|新聞|マーケティング|動画配信|WEB制作|ウェブ制作|制作会社|${word("PR")}`, "i")],
+    ["ゲーム・エンタメ", /ゲーム|エンタメ|エンターテ|音楽|アニメ|映像|スポーツ|ライブ配信/],
+    ["教育", new RegExp(`教育|学校|塾|大学|学習|スクール|保育|${word("EdTech")}`, "i")],
+    ["人材・HR", new RegExp(`人材|採用|求人|派遣|人事|労務|${word("HR")}|${word("HRTech")}`, "i")],
+    ["旅行・飲食・サービス", /旅行|ホテル|飲食|外食|観光|レジャー|美容|ブライダル|宿泊/],
+    ["エネルギー", /電力|エネルギー|ガス|石油|水道/],
+    ["IT・SaaS", new RegExp(`ソフトウェア|インターネット|クラウド|システム|情報|スタートアップ|ウェブ|${word("SaaS|IT|Web|SIer|SI|AI")}`, "i")],
+  ];
+  const OTHER_INDUSTRY = "そのほかの業界", NO_INDUSTRY = "業界の記録なし";
+  // 月数が読み取れない経歴（開始・終了が空）に仮に置く月数。0にすると、その業界が数に入らないため。
+  const INDUSTRY_DEFAULT_MONTHS = 6;
+  function industryGroup(raw) {
+    const text = String(raw == null ? "" : raw).trim();
+    if (!text) return "";
+    const hit = INDUSTRY_GROUPS.find(([, pattern]) => pattern.test(text));
+    return hit ? hit[0] : OTHER_INDUSTRY;
+  }
+  /** 「[金融:36, WEB制作:12]」→ [["金融", 36], ["WEB制作", 12]]（業界名の原文と月数）。空なら []。 */
+  function parseIndustries(value) {
+    return splitList(value).map((item) => {
+      const at = item.lastIndexOf(":");
+      const name = (at === -1 ? item : item.slice(0, at)).trim();
+      const months = at === -1 ? NaN : Number(item.slice(at + 1));
+      return [name, months > 0 ? months : INDUSTRY_DEFAULT_MONTHS];
+    }).filter((x) => x[0]);
+  }
+  /** その人の経歴のうち、各業界の区分が占める割合（区分 → 0〜1。月数で数える）。 */
+  function industryShares(industries) {
+    const shares = new Map();
+    const total = industries.reduce((sum, x) => sum + x[1], 0);
+    industries.forEach(([raw, months]) => { const g = industryGroup(raw); shares.set(g, (shares.get(g) || 0) + months / total); });
+    return shares;
+  }
+
+  // ---- できること（グループの分け方「ロール・スコープ」に使う） ----
+  // 「上流から対応できる」「マーケもできる」「SEOもできる」のように、技術の種類ではなく担える仕事で分ける
+  // （2026-11-11、富田依頼）。材料は、業務スコープ（scopes 列）と、言語に依らない系統のスキルを持つかどうか。
+  // 言語・フレームワークの系統（Java系など）は入れない（それは「技術」の分け方で見るため）。
+  const ABILITY_OF_FAMILY = {
+    "マーケティング": "マーケ", "デザイン・Web制作": "デザイン・Web制作", "データ基盤・分析": "データ基盤・BI",
+    "AI・LLM": "AI活用", "SaaS・業務パッケージ": "SaaS導入", "Office自動化・ローコード": "業務自動化",
+  };
+  const ABILITY_OF_SKILL = { "SEO": "SEO" };
+  const UPSTREAM_ABILITY = "上流から実装まで";
+  function abilitiesOf(t) {
+    const out = t.scopes.slice();
+    const add = (x) => { if (x && !out.includes(x)) out.push(x); };
+    if (t.scopes.includes("要件定義") && t.scopes.includes(IMPLEMENT_SCOPE)) add(UPSTREAM_ABILITY);
+    t.tech.forEach((sk) => { add(ABILITY_OF_FAMILY[familyOf(sk)]); add(ABILITY_OF_SKILL[sk]); });
+    return out;
+  }
+
+  function countItems(sets) {
+    const df = new Map();
+    sets.forEach((s) => s.forEach((x) => df.set(x, (df.get(x) || 0) + 1)));
+    return df;
+  }
+  function idf(sets, damp) {
+    const n = sets.length, w = new Map();
+    // +1 で、全員が持っている項目も重み0にはしない（ごく小さくする）。
+    countItems(sets).forEach((count, item) =>
+      w.set(item, (Math.log((n + 1) / count) + 0.05) * (damp && damp.has(item) ? GENERIC_TOOL_WEIGHT : 1)));
+    return w;
+  }
+  function weightedJaccard(a, b, w) {
+    let inter = 0, union = 0;
+    a.forEach((x) => { union += w.get(x); if (b.has(x)) inter += w.get(x); });
+    b.forEach((x) => { if (!a.has(x)) union += w.get(x); });
+    return union ? inter / union : 0;
+  }
+
+  /**
+   * その人のスキルのうち、各系統が占める割合（系統 → 0〜1）。系統に入らないスキルも分母に数える。
+   * 業務スコープに「実装」が無く、PM・PMO・コンサル・事業企画・プリセールスを2つ以上持つ人には、「企画・マネジメント」の系統を足す。
+   */
+  function familyShares(tech, scopes) {
+    const shares = new Map();
+    tech.forEach((s) => { const f = familyOf(s); if (f) shares.set(f, (shares.get(f) || 0) + 1 / tech.length); });
+    if (scopes && !scopes.includes(IMPLEMENT_SCOPE) && scopes.filter((sc) => MANAGEMENT_SCOPES.has(sc)).length >= 2) {
+      shares.set(MANAGEMENT_FAMILY, MANAGEMENT_SHARE);
+    }
+    return shares;
+  }
+  // 系統の割合どうしの近さ（コサイン類似度）。多くの人が持つ系統（クラウド・データベース）は軽く数える。
+  function familyCosine(a, b, w) {
+    let dot = 0, na = 0, nb = 0;
+    a.forEach((v, f) => { const x = v * w.get(f); na += x * x; if (b.has(f)) dot += x * b.get(f) * w.get(f); });
+    b.forEach((v, f) => { const x = v * w.get(f); nb += x * x; });
+    return na && nb ? dot / Math.sqrt(na * nb) : 0;
+  }
+
+  /** 人材のペア → 近さ（0〜1）。sims[i][j]（対称）。 */
+  function similarityMatrix(talents) {
+    const techSets = talents.map((t) => new Set(t.tech)), scopeSets = talents.map((t) => new Set(t.scopes));
+    const shares = talents.map((t) => familyShares(t.tech, t.scopes));
+    const techW = idf(techSets, GENERIC_TOOLS), scopeW = idf(scopeSets, null);
+    const familyW = idf(shares.map((m) => new Set(m.keys())), null);
+    const n = talents.length, sims = talents.map(() => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const pos = talents[i].main_position && talents[i].main_position === talents[j].main_position ? 1 : 0;
+      sims[i][j] = sims[j][i] = WEIGHT_SKILL * weightedJaccard(techSets[i], techSets[j], techW)
+        + WEIGHT_FAMILY * familyCosine(shares[i], shares[j], familyW)
+        + WEIGHT_SCOPE * weightedJaccard(scopeSets[i], scopeSets[j], scopeW) + WEIGHT_POSITION * pos;
+    }
+    return sims;
+  }
+
+  const byScoreThenIndex = (a, b) => b[0] - a[0] || a[1] - b[1];
+  const ranked = (sims, i) => sims[i].map((s, j) => [s, j]).filter((x) => x[1] !== i).sort(byScoreThenIndex);
+
+  /** 人ごとに近い上位k人への線を選ぶ（どちらか一方の上位に入れば線を引く）。"i:j"（i<j）→ 近さ。 */
+  function topKEdges(sims) {
+    const edges = new Map();
+    for (let i = 0; i < sims.length; i++) {
+      for (const [s, j] of ranked(sims, i).slice(0, TOP_K)) {
+        if (s < MIN_SIMILARITY) break;
+        edges.set(`${Math.min(i, j)}:${Math.max(i, j)}`, s);
+      }
+    }
+    return edges;
+  }
+
+  // 重みの合計がいちばん大きいラベル（同点は番号が小さい方）。毎回同じ結果になるよう、同点の扱いを固定する。
+  function bestLabel(score) {
+    let best = null, bestScore = -Infinity;
+    score.forEach((v, lab) => { if (v > bestScore || (v === bestScore && lab < best)) { best = lab; bestScore = v; } });
+    return best;
+  }
+
+  /** 重み付きラベル伝播で塊を決め、小さすぎる塊を隣に入れ、大きい塊から 0,1,2… と番号を振る。 */
+  function clusterLabels(n, edges) {
+    const adj = Array.from({ length: n }, () => []);
+    edges.forEach((w, key) => { const [i, j] = key.split(":").map(Number); adj[i].push([j, w]); adj[j].push([i, w]); });
+    let labels = Array.from({ length: n }, (_, i) => i);
+    for (let round = 0; round < LABEL_PROPAGATION_ROUNDS; round++) {
+      let changed = false;
+      for (let i = 0; i < n; i++) {
+        if (!adj[i].length) continue;
+        const score = new Map();
+        adj[i].forEach(([j, w]) => score.set(labels[j], (score.get(labels[j]) || 0) + w));
+        const best = bestLabel(score);
+        if (best !== labels[i]) { labels[i] = best; changed = true; }
+      }
+      if (!changed) break;
+    }
+    // SMALL_CLUSTER_SIZE 人以下の塊を、線の重みの合計がいちばん大きい隣の塊へ入れる（小さい塊から順に）。
+    for (;;) {
+      const sizes = new Map();
+      labels.forEach((l) => sizes.set(l, (sizes.get(l) || 0) + 1));
+      const small = [...sizes].filter(([, size]) => size <= SMALL_CLUSTER_SIZE).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+      let merged = false;
+      for (const [lab] of small) {
+        const score = new Map();
+        labels.forEach((li, i) => { if (li === lab) adj[i].forEach(([j, w]) => {
+          if (labels[j] !== lab) score.set(labels[j], (score.get(labels[j]) || 0) + w);
+        }); });
+        if (!score.size) continue;  // どこともつながっていない塊はそのまま
+        const target = bestLabel(score);
+        labels = labels.map((x) => (x === lab ? target : x));
+        merged = true;
+        break;
+      }
+      if (!merged) break;
+    }
+    const sizes = new Map();
+    labels.forEach((l) => sizes.set(l, (sizes.get(l) || 0) + 1));
+    const order = new Map([...sizes].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([lab], idx) => [lab, idx]));
+    return labels.map((l) => order.get(l));
+  }
+
+  const mostCommon = (values) => {
+    const cnt = new Map();
+    values.filter((v) => v).forEach((v) => cnt.set(v, (cnt.get(v) || 0) + 1));
+    return [...cnt].sort((a, b) => b[1] - a[1])[0] || null;
+  };
+  const byScoreThenName = (a, b) => b[0] - a[0] || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+
+  /**
+   * 塊ごとの名前: その塊に多い系統（最大2つ）と、その系統の中で塊に多いスキル（1つ目は3つ、2つ目は2つまで）。「Webフロント（React・Vue）」。
+   * 系統が取れない塊（PM・コンサル寄り）は、ロールと、その塊に多い業務スコープで名前にする。
+   */
+  function clusterNames(talents, clusters) {
+    const n = talents.length;
+    const scopeDf = countItems(talents.map((t) => new Set(t.scopes)));
+    const allShares = talents.map((t) => familyShares(t.tech, t.scopes));
+    const overall = new Map();
+    allShares.forEach((m) => m.forEach((v, f) => overall.set(f, (overall.get(f) || 0) + v / n)));
+    const members = new Map();
+    talents.forEach((t, i) => { if (!members.has(clusters[i])) members.set(clusters[i], []); members.get(clusters[i]).push(i); });
+    const names = new Map();
+    members.forEach((idx, c) => {
+      const group = idx.map((i) => talents[i]);
+      // 系統: 塊の中での平均の割合 × 全体に対する偏り。塊の中で2人以上が持つ系統だけ（1人だけは偶然のため）。
+      const mean = new Map(), holders = new Map();
+      idx.forEach((i) => allShares[i].forEach((v, f) => {
+        mean.set(f, (mean.get(f) || 0) + v / idx.length); holders.set(f, (holders.get(f) || 0) + 1);
+      }));
+      const families = [...mean].filter(([f]) => holders.get(f) >= 2 || idx.length === 1)
+        .map(([f, v]) => [v * Math.log(v / overall.get(f) + 1), f]).filter((x) => x[0] > 0)
+        .sort(byScoreThenName).slice(0, 2)
+        // 2つ目の系統は、1つ目の半分以上の強さがあるときだけ名前に入れる（弱い系統で名前がぼやけないように）。
+        .filter((x, k, arr) => k === 0 || x[0] >= arr[0][0] * 0.5).map((x) => x[1]);
+      // その塊に多い業務スコープ（「企画・マネジメント」の中身と、系統が取れない塊の名前に使う）。
+      const scopeCnt = countItems(group.map((t) => new Set(t.scopes))), scopeScored = [];
+      scopeCnt.forEach((k, sc) => {
+        if (k >= 2 || group.length === 1) scopeScored.push([(k / group.length) * Math.log(n / scopeDf.get(sc) + 1), sc]);
+      });
+      const topScopes = scopeScored.sort(byScoreThenName).slice(0, 3).map((x) => x[1]);
+      const parts = families.map((f, k) => {
+        if (f === MANAGEMENT_FAMILY) return topScopes.length ? `${f}（${topScopes.join("・")}）` : f;
+        // 系統の中で、塊に多いスキル上位3つ。HTML・CSS は、ほかに挙げるスキルがあるときは出さない。
+        const cnt = countItems(group.map((t) => new Set(t.tech.filter((s) => familyOf(s) === f))));
+        const ranked = [...cnt].map(([s, k]) => [k, s]).sort(byScoreThenName).map((x) => x[1]);
+        const specific = ranked.filter((s) => !NAME_EXCLUDE.has(s));
+        // 2つ目の系統は、名前が長くなりすぎないようスキルを2つまでにする。
+        return `${f}（${(specific.length ? specific : ranked).slice(0, k === 0 ? 3 : 2).join("・")}）`;
+      });
+      if (parts.length) { names.set(c, parts.join("／")); return; }
+      // ロール（role列）が塊の4割以上で揃っていれば、頭に付ける（「PMO・PjM・ディレクター｜…」）。
+      const role = mostCommon(group.map((t) => t.role));
+      let head = role && role[1] >= Math.max(2, group.length * 0.4) ? role[0] : "";
+      const picked = topScopes;
+      if (!picked.length && !head) { const pos = mostCommon(group.map((t) => t.main_position)); head = pos ? pos[0] : "その他"; }
+      names.set(c, [head, picked.join("・")].filter((x) => x).join("｜"));
+    });
+    return names;
+  }
+
+  // ---- グループの分け方「ロール・スコープ」「業界」 ----
+  // どちらも { sims, shared(i, j), names(clusters), clusters? } を返す。clusters があれば、ラベル伝播の代わりにそれを塊にする。
+  const ROLE_WEIGHT_ABILITY = 0.5, ROLE_WEIGHT_ROLE = 0.3, ROLE_WEIGHT_TOP = 0.1, ROLE_WEIGHT_MAIN = 0.1;
+  const INDUSTRY_WEIGHT_INDUSTRY = 0.7, INDUSTRY_WEIGHT_TECH = 0.3;
+  const VIEW_SHARED_MAX = 4;
+
+  /** ロール・スコープ: 「できること」（abilitiesOf）と、ロール・役職が同じかで近さを測る。技術の種類は見ない。 */
+  function roleView(talents) {
+    const n = talents.length;
+    const abilities = talents.map((t) => new Set(abilitiesOf(t)));
+    const w = idf(abilities, null), df = countItems(abilities);
+    const same = (a, b) => (a && a === b ? 1 : 0);
+    const sims = talents.map(() => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      sims[i][j] = sims[j][i] = ROLE_WEIGHT_ABILITY * weightedJaccard(abilities[i], abilities[j], w)
+        + ROLE_WEIGHT_ROLE * same(talents[i].role, talents[j].role)
+        + ROLE_WEIGHT_TOP * same(talents[i].top_position, talents[j].top_position)
+        + ROLE_WEIGHT_MAIN * same(talents[i].main_position, talents[j].main_position);
+    }
+    // 共通の「できること」は、持っている人が少ないもの（その2人らしいもの）から出す。
+    const shared = (i, j) => [...abilities[i]].filter((x) => abilities[j].has(x))
+      .map((x) => [w.get(x), x]).sort(byScoreThenName).slice(0, VIEW_SHARED_MAX).map((x) => x[1]);
+    // 名前: 塊の4割以上で揃うロール｜その塊に偏って多い「できること」上位3つ。
+    const names = (clusters) => {
+      const members = new Map(), out = new Map();
+      clusters.forEach((c, i) => { if (!members.has(c)) members.set(c, []); members.get(c).push(i); });
+      members.forEach((idx, c) => {
+        const scored = [];
+        countItems(idx.map((i) => abilities[i])).forEach((k, a) => {
+          if (k >= 2 || idx.length === 1) scored.push([(k / idx.length) * Math.log(n / df.get(a) + 1), a]);
+        });
+        const top = scored.sort(byScoreThenName).slice(0, 3).map((x) => x[1]);
+        const role = mostCommon(idx.map((i) => talents[i].role));
+        const head = role && (idx.length === 1 || role[1] >= Math.max(2, idx.length * 0.4)) ? role[0] : "";
+        out.set(c, [head, top.join("・")].filter((x) => x).join("｜") || "そのほか");
+      });
+      return out;
+    };
+    return { sims, shared, names };
+  }
+
+  /**
+   * 業界: 経歴のうち各業界の区分が占める割合で近さを測る（技術の近さを3割足すのは、同じ業界の中で技術が近い人を結ぶため）。
+   * 塊は、その人の「割合×珍しさ」がいちばん大きい区分で直接決める（ラベル伝播だと、塊の名前と中の人の業界がずれるため）。
+   * 珍しさを掛けるのは、「IT・SaaS」のように多くの人が持つ区分に全員が入ってしまうのを避けるため。
+   */
+  function industryView(talents, techSims) {
+    const n = talents.length;
+    const shares = talents.map((t) => industryShares(t.industries || []));
+    const w = idf(shares.map((m) => new Set(m.keys())), null);
+    const sims = talents.map(() => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      sims[i][j] = sims[j][i] = INDUSTRY_WEIGHT_INDUSTRY * familyCosine(shares[i], shares[j], w)
+        + INDUSTRY_WEIGHT_TECH * techSims[i][j];
+    }
+    const primary = shares.map((m) =>
+      m.size ? [...m].map(([g, v]) => [v * w.get(g), g]).sort(byScoreThenName)[0][1] : NO_INDUSTRY);
+    const sizes = new Map();
+    primary.forEach((g) => sizes.set(g, (sizes.get(g) || 0) + 1));
+    // 人数の多い順に番号を振る。「業界の記録なし」は最後。
+    const order = [...sizes].map(([g, size]) => [g === NO_INDUSTRY ? -1 : size, g]).sort(byScoreThenName).map((x) => x[1]);
+    const clusters = primary.map((g) => order.indexOf(g));
+    const shared = (i, j) => [...shares[i]].filter(([g]) => shares[j].has(g))
+      .map(([g, v]) => [Math.min(v, shares[j].get(g)), g]).sort(byScoreThenName).slice(0, VIEW_SHARED_MAX).map((x) => x[1]);
+    return { sims, shared, clusters, names: () => new Map(order.map((g, k) => [k, g])) };
+  }
+
+  /**
+   * 画面に渡すデータ（点・線・塊・スキルの点）を作る。
+   * mode はグループの分け方: 省略・"tech"＝技術の系統（これまでどおり）、"role"＝ロール・スコープ、"industry"＝業界。
+   */
+  function buildGraph(talents, mode) {
+    const techSims = similarityMatrix(talents);
+    const view = mode === "role" ? roleView(talents) : mode === "industry" ? industryView(talents, techSims) : null;
+    const sims = view ? view.sims : techSims;
+    const edges = topKEdges(sims);
+    const clusters = view && view.clusters ? view.clusters : clusterLabels(talents.length, edges);
+    const names = view ? view.names(clusters) : clusterNames(talents, clusters);
+    const common = (i, j) => { const other = new Set(talents[j].tech); return talents[i].tech.filter((x) => other.has(x)).slice(0, 6); };
+    const round3 = (x) => Math.round(x * 1000) / 1000;
+    // 2人に共通する系統（割合の小さい方が大きい順に2つ）。同じスキルが無くても近い理由を、画面に出すため。
+    const shares = talents.map((t) => familyShares(t.tech, t.scopes));
+    const commonFamilies = (i, j) => [...shares[i]].filter(([f]) => shares[j].has(f))
+      .map(([f, v]) => [Math.min(v, shares[j].get(f)), f]).sort(byScoreThenName).slice(0, 2).map((x) => x[1]);
+    const nodes = talents.map((t, i) => ({
+      ...t, cluster: clusters[i],
+      neighbors: ranked(sims, i).slice(0, 5).map(([s, j]) => (
+        { id: talents[j].id, sim: round3(s), common: common(i, j), families: commonFamilies(i, j),
+          shared: view ? view.shared(i, j) : [] })),
+    }));
+    const links = [...edges].map(([key, s]) => { const [i, j] = key.split(":").map(Number); return [i, j, s]; })
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1])
+      .map(([i, j, s]) => ({ from: talents[i].id, to: talents[j].id, sim: round3(s), common: common(i, j) }));
+    const sizes = new Map();
+    clusters.forEach((c) => sizes.set(c, (sizes.get(c) || 0) + 1));
+    const hubs = [...countItems(talents.map((t) => new Set(t.tech)))].filter(([, c]) => c >= HUB_MIN_COUNT)
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([skill, count]) => ({ skill, count }));
+    return {
+      nodes, links, hubs,
+      clusters: [...sizes].sort((a, b) => a[0] - b[0]).map(([id, size]) => ({ id, name: names.get(id), size })),
+    };
+  }
+
+  // ---- 案件から近い人材を探す ----
+  // 案件の文面（募集要項の貼り付け、またはスキルを並べたもの）から、知っているスキルと業務スコープだけを拾う。
+  // 文章の意味は読まない（LLMは使わない）。拾えるのは、系統の表（SKILL_FAMILIES）・表記ゆれの表（ALIASES）にあるスキルと、
+  // 図に載っている誰かが持っているスキル・業務スコープ。拾ったものは画面に出し、読み取りの間違いに気づけるようにする。
+  const MATCH_FAMILY_CREDIT = 0.5;  // 同じスキルは無いが、同じ系統のスキルを持つときの点（同じスキルを1とする）
+  const MATCH_WEIGHT_TECH = 0.8, MATCH_WEIGHT_SCOPE = 0.2;
+  // 英字のスキル名に使う文字。これ以外（日本語・空白以外の記号）は語の切れ目とみなす。
+  // 「&」を入れているのは、「R&D」の R を R言語と取り違えないため。「/」は「PL/SQL」「TS/JS」のため（当たらなければ / で分ける）。
+  const NON_WORD = /[^A-Za-z0-9#+.&_\/\- ]+/;
+  // 工程の順番。「基本設計〜テスト」のような範囲の書き方を、間の工程も含めて読むために使う。
+  const PROCESS_ORDER = ["要件定義", "基本設計", "詳細設計", "実装", "テスト"];
+  const RANGE_MARK = "(?:〜|～|~|－|ー|―|-|から)";
+
+  // 必須・尚可の見分け。募集要項の見出し（「【必須スキル】」「■尚可」）や、行の中の語（「必須: Java、尚可: AWS」）で切り替える。
+  // 「必須」を重くするのは、尚可のスキルばかり持つ人が、必須を持つ人より上に来ないようにするため（2026-11-11、富田指示）。
+  // 必須が読み取れた案件では、スキルの点を「必須をどれだけ満たすか」7割＋「それ以外をどれだけ満たすか」3割で出す。
+  // 重みを掛けるだけ（必須3・尚可1 など）だと、尚可を3つ持つ人が、必須を持つ人を上回ることがあったため、枠を分けた。
+  // 「それ以外」の中では、どちらとも書かれていないスキル（件名・スキル欄など）を2、尚可を1の重みで数える。
+  const REQUIRED_MARK = /必須|マスト|MUST/gi;
+  const OPTIONAL_MARK = /尚可|歓迎|優遇|あれば(?:尚|なお)?(?:良|よ)|ウォント|WANT|ベター|BETTER/gi;
+  // 見出しらしい行（【…】、■・◆・▼ などで始まる行）。必須・尚可の語が無い見出しが来たら、区別なしに戻す。
+  const HEADING_LINE = /^\s*(?:[【■□◆◇▼▽●○◎★☆〈《＜<\[［]|#{1,3}\s)/;
+  const MATCH_REQUIRED_SHARE = 0.7;
+  const MATCH_OTHER_WEIGHTS = { normal: 2, optional: 1 };
+
+  // 役職（ロール）の経験。案件の文面の語を、DB_talent の役職の区分（top_position・main_position 列の値）に対応させる。
+  // - 「上の役職の経験があれば、下の役職の経験もあり」とはみなさない（2026-11-11、富田決定）。区分が一致した人だけを
+  //   「経験あり」にする。PM一筋で技術リードの経験が無い人が、テックリードの案件に当たるのを避けるため。
+  // - 人材側で見るのは「最も高い役職」「主な役職」の2列と、業務スコープの PM・PMO だけ。経歴の途中で担った役職は
+  //   シートの列に無いため、拾えない（取りこぼしが気になったら「解析結果」タブを読む形に広げる）。
+  // - 文章の意味は読まないので、「PMの指示のもとで」のような書き方でも PM を拾う。拾ったものは画面に出す。
+  // 上から順に当て、当たった語は消してから次を当てる（「プロジェクトリーダー」を「リーダー」と二重に数えないため）。
+  // 英字の語は、前後が英字でないときだけ拾う（「PMO」から PM、「PoC」「POS」から PO を拾わない。「PL/SQL」は PL にしない）。
+  const ROLE_PATTERNS = [
+    ["CxO", /(^|[^A-Za-z])(?:CTO|CEO|COO|CIO|CFO|CxO|VPoE)(?![A-Za-z])|執行役員/g],
+    ["事業責任者・PO", /(^|[^A-Za-z])PO(?![A-Za-z])|プロダクトオーナー|事業責任者/g],
+    ["PMO", /(^|[^A-Za-z])PMO(?![A-Za-z])/g],
+    ["PdM・PM", /(^|[^A-Za-z])(?:PM|PdM|PjM)(?![A-Za-z])|(?:プロジェクト|プロダクト)マネー?ジャ/g],
+    ["テックリード・PL", /(^|[^A-Za-z])PL(?!\/SQL)(?![A-Za-z])|テックリード|テックリーダー|プロジェクトリーダー|技術リード|リードエンジニア/g],
+    ["リーダー", /リーダー(?!シップ)|リーダ(?=経験)/g],
+  ];
+  // 業務スコープの語で、その役職の経験とみなすもの。案件からこの役職を読み取ったときは、工程の点には数えない（二重に数えないため）。
+  const ROLE_SCOPE = { "PdM・PM": "PM", "PMO": "PMO" };
+  // 役職が読み取れた案件の配分。読み取れなかった要素は除いて、残りの重みで割り直す。
+  const MATCH_WEIGHTS_WITH_ROLE = { tech: 0.6, role: 0.2, scope: 0.2 };
+
+  function extractRoles(part) {
+    let rest = part;
+    const found = [];
+    ROLE_PATTERNS.forEach(([role, pattern]) => {
+      pattern.lastIndex = 0;
+      if (pattern.test(rest)) { found.push(role); rest = rest.replace(pattern, "$1｜"); }
+    });
+    return found;
+  }
+
+  /**
+   * 案件の文面 → { skills, scopes, required, optional, roles, requiredRoles }。skills は読み取った全スキル（代表表記）。
+   * required＝必須の欄にあったスキル、optional＝尚可の欄にだけあったスキル（どちらにも無いものは区別なし）。
+   * roles＝読み取った役職の区分、requiredRoles＝そのうち必須の欄にあったもの。
+   * 図の人材（talents）から語彙を作る。
+   */
+  function parseProject(text, talents) {
+    const source = String(text == null ? "" : text);
+    const known = new Set(FAMILY_OF.keys());
+    Object.keys(ALIASES).forEach((k) => [].concat(ALIASES[k]).forEach((v) => known.add(v)));
+    const scopeVocabulary = new Set(PROCESS_ORDER);
+    talents.forEach((t) => { t.tech.forEach((x) => known.add(x)); t.scopes.forEach((x) => scopeVocabulary.add(x)); });
+    const japaneseSkills = [...known].filter((sk) => /[^\x00-\x7F]/.test(sk));
+
+    /** 文の一部から、知っているスキルを出てきた順に拾う。 */
+    const extract = (part) => {
+      const found = [];
+      const take = (candidate) => {
+        const raw = candidate.replace(/^[&_\-/]+|[.&_\-/]+$/g, "");
+        if (!raw) return false;
+        const hit = normalizeSkill(raw).filter((sk) => known.has(sk));
+        hit.forEach((sk) => { if (!found.includes(sk)) found.push(sk); });
+        return hit.length > 0;
+      };
+      part.split(NON_WORD).forEach((segment) => {
+        const words = segment.trim().split(/ +/).filter((w) => w);
+        // 長い組み合わせから試し、当たった語は使い切る（「Ruby on Rails」を RoR と Ruby の2つに数えないため）。
+        for (let i = 0; i < words.length;) {
+          let used = 0;
+          for (let n = Math.min(3, words.length - i); n >= 1 && !used; n--) {
+            const candidate = words.slice(i, i + n).join(" ");
+            // 1文字のスキル（C・R）は、前後が区切られているときだけ拾う（文中の英字1文字と取り違えやすいため）。
+            if (n === 1 && candidate.length === 1 && words.length > 1) continue;
+            if (take(candidate)) used = n;
+            else if (n === 1 && candidate.includes("/")) { candidate.split("/").forEach((x) => { if (x.length > 1) take(x); }); }
+          }
+          i += used || 1;
+        }
+      });
+      // 日本語を含むスキル名（「生成AI」「日立ホスト」）は、そのまま出ていれば拾う。
+      japaneseSkills.forEach((sk) => { if (part.includes(sk) && !found.includes(sk)) found.push(sk); });
+      return found;
+    };
+
+    // 行ごとに、必須・尚可・区別なしのどの欄かを追いながら拾う。
+    const kindOf = new Map();  // スキル → "required" | "normal" | "optional"（複数の欄にあれば重い方）
+    const rank = { required: 3, normal: 2, optional: 1 };
+    const roleKind = new Map();  // 役職の区分 → 同上
+    const keep = (map, key, kind) => { if (!map.has(key) || rank[kind] > rank[map.get(key)]) map.set(key, kind); };
+    const put = (part, kind) => {
+      extract(part).forEach((sk) => keep(kindOf, sk, kind));
+      extractRoles(part).forEach((role) => keep(roleKind, role, kind));
+    };
+    let section = "normal";
+    source.split(/\r?\n/).forEach((line) => {
+      const marks = [];
+      let m;
+      REQUIRED_MARK.lastIndex = 0; OPTIONAL_MARK.lastIndex = 0;
+      while ((m = REQUIRED_MARK.exec(line)) !== null) marks.push({ at: m.index, end: m.index + m[0].length, kind: "required" });
+      while ((m = OPTIONAL_MARK.exec(line)) !== null) marks.push({ at: m.index, end: m.index + m[0].length, kind: "optional" });
+      marks.sort((x, y) => x.at - y.at);
+      if (!marks.length) {
+        if (HEADING_LINE.test(line)) section = "normal";
+        put(line, section);
+        return;
+      }
+      // 行の中に語があるとき: 語より前は今の欄（見出しの行なら区別なし）、語より後ろは次の語までその欄。
+      put(line.slice(0, marks[0].at), HEADING_LINE.test(line) ? "normal" : section);
+      marks.forEach((mark, k) => put(line.slice(mark.end, k + 1 < marks.length ? marks[k + 1].at : line.length), mark.kind));
+      section = marks[marks.length - 1].kind;
+    });
+    const skills = [...kindOf.keys()];
+
+    // 業務スコープ。英字のもの（PM・PMO）は、前後が英字でないときだけ（「PMO」から「PM」を拾わないため）。
+    const hasScope = (sc) => /^[A-Za-z]+$/.test(sc)
+      ? new RegExp(`(^|[^A-Za-z])${sc}([^A-Za-z]|$)`).test(source) : source.includes(sc);
+    const scopes = [...scopeVocabulary].filter(hasScope);
+    for (let i = 0; i < PROCESS_ORDER.length; i++) for (let j = i + 2; j < PROCESS_ORDER.length; j++) {
+      if (new RegExp(`${PROCESS_ORDER[i]}\\s*${RANGE_MARK}\\s*${PROCESS_ORDER[j]}`).test(source)) {
+        PROCESS_ORDER.slice(i + 1, j).forEach((sc) => { if (!scopes.includes(sc)) scopes.push(sc); });
+      }
+    }
+    return {
+      skills, scopes,
+      required: skills.filter((sk) => kindOf.get(sk) === "required"),
+      optional: skills.filter((sk) => kindOf.get(sk) === "optional"),
+      roles: ROLE_PATTERNS.map(([role]) => role).filter((role) => roleKind.has(role)),
+      requiredRoles: ROLE_PATTERNS.map(([role]) => role).filter((role) => roleKind.get(role) === "required"),
+    };
+  }
+
+  /**
+   * 案件に近い順に人材を並べる。点数（0〜1）は、スキルの点8割＋工程の点2割（片方しか読み取れなければ、読み取れた方だけ）。
+   * - スキルの点: 同じスキル＝1、同じ系統の別スキル＝0.5 として、案件のスキルをどれだけ満たすか。
+   *   必須が読み取れた案件では、必須の満たし具合7割＋それ以外（区別なし2・尚可1の重み）の満たし具合3割。
+   * - 工程の点: 案件の業務スコープのうち何割を持つか。
+   * - 役職の点: 案件から役職（PM・テックリードなど）が読み取れたとき、その役職の経験がある割合。このときの配分は
+   *   スキル6割・役職2割・工程2割。必須の欄に書かれた役職は、役職の点ではなく、スキルの必須と同じ枠で数える。
+   * 返すのは点数が0より大きい人だけ。exact＝同じスキル、near＝同じ系統の別スキル、missing＝どちらも無いスキル、
+   * missingRequired＝missing のうち必須のもの。roles＝経験のある役職、missingRoles＝経験の無い役職、
+   * missingRequiredRoles＝missingRoles のうち必須のもの。
+   */
+  function matchProject(talents, text) {
+    const project = parseProject(text, talents);
+    const required = new Set(project.required), optional = new Set(project.optional);
+    const otherWeight = (sk) => optional.has(sk) ? MATCH_OTHER_WEIGHTS.optional : MATCH_OTHER_WEIGHTS.normal;
+    const others = project.skills.filter((sk) => !required.has(sk));
+    const otherTotal = others.reduce((sum, sk) => sum + otherWeight(sk), 0);
+    const requiredRoles = project.requiredRoles;
+    const otherRoles = project.roles.filter((role) => !requiredRoles.includes(role));
+    const roleScopes = new Set(project.roles.map((role) => ROLE_SCOPE[role]).filter((sc) => sc));
+    const scopes = project.scopes.filter((sc) => !roleScopes.has(sc));
+    const hasRole = (t, role) => t.top_position === role || t.main_position === role
+      || (!!ROLE_SCOPE[role] && t.scopes.includes(ROLE_SCOPE[role]));
+    const requiredTotal = required.size + requiredRoles.length;
+    const results = [];
+    if (project.skills.length || scopes.length || project.roles.length) talents.forEach((t) => {
+      const have = new Set(t.tech), families = new Map();
+      // HTML・CSS だけでは「同じ系統の経験がある」とはみなさない（React の代わりに HTML、とは言えないため）。
+      t.tech.forEach((sk) => { const f = familyOf(sk); if (f && !NAME_EXCLUDE.has(sk) && !families.has(f)) families.set(f, sk); });
+      const exact = [], near = [], missing = [];
+      let gotRequired = 0, gotOther = 0;
+      project.skills.forEach((sk) => {
+        const f = familyOf(sk);
+        let credit = 0;
+        if (have.has(sk)) { exact.push(sk); credit = 1; }
+        else if (f && families.has(f)) { near.push({ skill: sk, via: families.get(f) }); credit = MATCH_FAMILY_CREDIT; }
+        else missing.push(sk);
+        if (required.has(sk)) gotRequired += credit; else gotOther += credit * otherWeight(sk);
+      });
+      const roleHits = project.roles.filter((role) => hasRole(t, role));
+      const gotRequiredRoles = requiredRoles.filter((role) => roleHits.includes(role)).length;
+      const requiredCover = requiredTotal ? (gotRequired + gotRequiredRoles) / requiredTotal : null;
+      const otherCover = others.length ? gotOther / otherTotal : null;
+      const tech = requiredCover === null ? otherCover
+        : otherCover === null ? requiredCover
+        : MATCH_REQUIRED_SHARE * requiredCover + (1 - MATCH_REQUIRED_SHARE) * otherCover;
+      const role = otherRoles.length ? otherRoles.filter((r) => roleHits.includes(r)).length / otherRoles.length : null;
+      const scopeHits = scopes.filter((sc) => t.scopes.includes(sc));
+      const scope = scopes.length ? scopeHits.length / scopes.length : null;
+      // 読み取れた要素だけで、重みを割り直す（役職が無ければ、これまでどおりスキル8割・工程2割）。
+      const parts = (role === null
+        ? [[tech, MATCH_WEIGHT_TECH], [scope, MATCH_WEIGHT_SCOPE]]
+        : [[tech, MATCH_WEIGHTS_WITH_ROLE.tech], [role, MATCH_WEIGHTS_WITH_ROLE.role], [scope, MATCH_WEIGHTS_WITH_ROLE.scope]]
+      ).filter((x) => x[0] !== null);
+      const weightTotal = parts.reduce((sum, x) => sum + x[1], 0);
+      const score = weightTotal ? parts.reduce((sum, x) => sum + x[0] * x[1], 0) / weightTotal : 0;
+      // スキルが読み取れた案件では、スキルが1つも当たらない人は載せない（工程・役職だけ合う人が並ぶのを防ぐ）。
+      if (score > 0 && (tech === null || tech > 0)) {
+        const missingRoles = project.roles.filter((r) => !roleHits.includes(r));
+        results.push({
+          id: t.id, score: Math.round(score * 1000) / 1000, exact, near, missing, scopes: scopeHits,
+          missingRequired: missing.filter((sk) => required.has(sk)),
+          roles: roleHits, missingRoles, missingRequiredRoles: missingRoles.filter((r) => requiredRoles.includes(r)),
+        });
+      }
+    });
+    results.sort((x, y) => y.score - x.score || y.exact.length - x.exact.length || (x.id < y.id ? -1 : 1));
+    return { skills: project.skills, scopes, required: project.required, optional: project.optional,
+      roles: project.roles, requiredRoles, results };
+  }
+
+  return { splitList, normalizeSkill, normalizeSkills, talentsFromRows, familyOf, familyShares, similarityMatrix, buildGraph,
+    parseProject, matchProject, CATEGORIES, LAYERS, EXTERNAL_LAYERS, externalLayerOf, layerOf, industryGroup, parseIndustries, abilitiesOf,
+    LAYOUT_WARMUP_TICKS, LAYOUT_COOLDOWN_MS };
+})();
+// ==== LOGIC:END ====
+</script>
+<script type="text/plain" id="talent-map-main">
+// 行のデータは、開いた側が埋め込む（Webアプリは 90_talent_map.gs、CSVからは src/run_talent_map.py）。
+const ROWS = __TALENT_DATA__.rows;
+const OPTIONS = __TALENT_DATA__.options;
+const GENERATED_AT = __TALENT_DATA__.generatedAt;
+const ALL = TalentMap.talentsFromRows(ROWS, OPTIONS);
+// Webアプリで開いたときだけ、サーバ（90_talent_map.gs）を呼べる。CSVから作ったHTMLでは呼べない。
+const canCallServer = typeof google !== "undefined" && google.script && google.script.run;
+// 社外向けのURLで開いたとき（90_talent_map.gs が決める）。氏名と DB_project の案件は、サーバが渡さない。
+const EXTERNAL = !!OPTIONS.external;
+// 絞り込みと、グループの分け方。変えるたびに、載せる人だけで近さ・グループを計算し直す（compute）。
+let category = "";                           // ""＝すべて、"フリーランス"、"プロパー"
+const LAYER_LIST = EXTERNAL ? TalentMap.EXTERNAL_LAYERS : TalentMap.LAYERS;  // 社外向けは4区分
+let layersOn = new Set(LAYER_LIST);          // 載せるレイヤー
+let mode = "tech";                           // "tech"＝技術、"role"＝ロール・スコープ、"industry"＝業界
+let DATA, byId, clusterName, people, hubNodes, hubSet, degree;
+// 点のオブジェクトは使い回す（作り直すと、絞り込みを変えるたびに配置が最初からやり直しになる）。
+const nodeCache = new Map();
+const cached = (id, data) => { const o = nodeCache.get(id) || {}; nodeCache.set(id, o); return Object.assign(o, data); };
+function compute() {
+  const shown = ALL.filter((t) => (!category || t.category === category) && layersOn.has(t.layer));
+  DATA = TalentMap.buildGraph(shown, mode);
+  byId = Object.fromEntries(DATA.nodes.map((n) => [n.id, n]));
+  clusterName = Object.fromEntries(DATA.clusters.map((c) => [c.id, c.name]));
+  people = DATA.nodes.map((n) => cached(n.id, { ...n, kind: "person" }));
+  hubNodes = DATA.hubs.map((h) => cached("skill:" + h.skill, { id: "skill:" + h.skill, skill: h.skill, count: h.count, kind: "skill" }));
+  hubSet = new Set(DATA.hubs.map((h) => h.skill));
+  // 点の大きさ: 線の本数が多い人（いろいろな人と近い人）ほど少し大きく。
+  degree = {};
+  DATA.links.forEach((l) => { degree[l.from] = (degree[l.from] || 0) + 1; degree[l.to] = (degree[l.to] || 0) + 1; });
+  document.getElementById("meta").textContent =
+    `${DATA.nodes.length}名${DATA.nodes.length < ALL.length ? `（全${ALL.length}名から絞り込み）` : ""}・${DATA.clusters.length}グループ｜${GENERATED_AT} 時点（日本時間）`;
+  const empty = document.getElementById("empty");
+  empty.hidden = DATA.nodes.length > 0;
+  empty.textContent = ALL.length
+    ? "絞り込みに当てはまる人がいません。左の「絞り込み」でカテゴリ・レイヤーを選び直してください。"
+    : "図に載せられる人材がいません（営業中で、スキルか業務スコープが解析済みの人が対象です）。";
+}
+compute();
+// 図の中の色。PCの表示設定（ダークモード／ライトモード）に合わせて切り替える。小窓の色は、上のCSSの変数が同じ切り替えをする。
+// dark は、暗い背景で浮かぶ、彩度を抑えた色（Obsidianのグループ色に近いトーン）。light は、白い背景でも見分けられる濃いめの色。
+const THEMES = {
+  dark: {
+    bg: "#1e1e1e", skill: "#7ac7a0", skillLabel: "#9fd8bb", label: "#dcddde", subLabel: "#8a8a8a", ring: "#fff", match: "#ffd166",
+    linkCenter: "rgba(168,139,250,.8)", linkLit: "rgba(255,255,255,.22)", linkDim: "rgba(255,255,255,.025)",
+    linkTag: "rgba(122,199,160,.10)", link: "rgba(255,255,255,.13)", glow: true,
+    palette: ["#8ab4f8","#f2a65a","#e57373","#6fd3c4","#9ccc65","#f6d365","#c39bd3","#f48fb1",
+              "#b0a17f","#90a4ae","#64b5f6","#81c784","#ff8a65","#ba68c8","#4dd0e1","#dce775"],
+  },
+  light: {
+    bg: "#f6f6f7", skill: "#2e8b62", skillLabel: "#1f6b4a", label: "#26262b", subLabel: "#66666e", ring: "#1b1b1f", match: "#b97a00",
+    linkCenter: "rgba(109,79,214,.85)", linkLit: "rgba(0,0,0,.30)", linkDim: "rgba(0,0,0,.035)",
+    linkTag: "rgba(46,139,98,.16)", link: "rgba(0,0,0,.16)", glow: false,
+    palette: ["#3b74d6","#d9822b","#d14343","#1f9e8f","#5f9e2f","#c49a00","#8e5bb5","#d6497f",
+              "#8a7748","#5f7480","#2a8fd6","#3f9a55","#e0603a","#9c3fb0","#1795a8","#8f9a16"],
+  },
+};
+const lightQuery = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: light)") : null;
+let THEME = THEMES[lightQuery && lightQuery.matches ? "light" : "dark"];
+const color = (c) => THEME.palette[c % THEME.palette.length];
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
+
+// ---- グラフのデータ（人の点＋任意でスキルの点。中身は compute が作る） ----
+let showHubs = false, alwaysLabels = false;
+const radius = (n) => n.kind === "skill" ? 2.2 + Math.sqrt(n.count) * 0.9 : 2.2 + Math.sqrt(degree[n.id] || 1) * 1.0;
+
+// ---- 光らせる対象（ホバー・選択・検索・グループ） ----
+let hover = null, selected = null, focusSet = null;
+// 案件から探したときの、人材番号 → { rank（1始まり）, score }。null なら案件では探していない。
+let matchById = null;
+const neighbors = new Map();
+const lid = (x) => typeof x === "object" ? x.id : x;
+function rebuildNeighbors(links) {
+  neighbors.clear();
+  links.forEach((l) => {
+    const a = lid(l.source), b = lid(l.target);
+    if (!neighbors.has(a)) neighbors.set(a, new Set());
+    if (!neighbors.has(b)) neighbors.set(b, new Set());
+    neighbors.get(a).add(b); neighbors.get(b).add(a);
+  });
+}
+const center = () => hover || selected;
+function litSet() {
+  const c = center();
+  if (c) { const s = new Set([c]); (neighbors.get(c) || []).forEach((x) => s.add(x)); return s; }
+  return focusSet;
+}
+const touchesCenter = (l) => { const c = center(); return c && (lid(l.source) === c || lid(l.target) === c); };
+
+// ---- スキルシートを開く（点のダブルクリック、または右の詳細の「スキルシート」ボタン） ----
+const DOUBLE_CLICK_MS = 350;
+let lastClick = { id: null, at: 0 }, flyTimer;
+function openSheet(id) {
+  const n = byId[id];
+  if (n && n.skill_sheet) window.open(n.skill_sheet, "_blank", "noopener");
+  else select(id, true);  // リンクが無い人は、詳細（「スキルシートの登録なし」と出る）を見せる
+}
+function flyTo(id) {
+  const node = people.find((x) => x.id === id);
+  if (node && node.x !== undefined) { Graph.centerAt(node.x, node.y, 700); Graph.zoom(Math.max(Graph.zoom(), 2.6), 700); }
+}
+
+// ---- 描画 ----
+const el = document.getElementById("graph");
+const FONT = 'Inter, "Hiragino Sans", "Noto Sans JP", sans-serif';
+const Graph = ForceGraph()(el)
+  .backgroundColor(THEME.bg)
+  .nodeId("id")
+  .nodeLabel(() => "")
+  .linkColor((l) => {
+    if (touchesCenter(l)) return THEME.linkCenter;
+    const lit = litSet();
+    if (lit) return lit.has(lid(l.source)) && lit.has(lid(l.target)) && !center() ? THEME.linkLit : THEME.linkDim;
+    return l.kind === "tag" ? THEME.linkTag : THEME.link;
+  })
+  .linkWidth((l) => (l.kind === "tag" ? 0.5 : 0.4 + l.sim * 2.2) * (touchesCenter(l) ? 1.6 : 1))
+  .nodeCanvasObject((n, ctx, scale) => {
+    const lit = litSet();
+    const isOn = !lit || lit.has(n.id);
+    const isCenter = n.id === center();
+    // 案件に近い人は、点数が高いほど大きく光らせ、上位3人には金色の輪を付ける。
+    const match = matchById && n.kind === "person" ? matchById.get(n.id) : null;
+    const r = radius(n) * (isCenter ? 1.35 : 1) * (match ? 1 + match.score * 0.9 : 1);
+    const col = n.kind === "skill" ? THEME.skill : color(n.cluster);
+    ctx.globalAlpha = isOn ? 1 : 0.12;
+    ctx.shadowColor = col;
+    // 光のにじみは暗い背景でだけ付ける（白い背景では点がぼやけて見えるため）。選んだ点・案件に合う人は、白い背景でも少し付ける。
+    ctx.shadowBlur = (isCenter ? 24 : match ? 8 + match.score * 22 : (lit && isOn ? 12 : 4)) * (THEME.glow ? 1 : (isCenter || match ? 0.4 : 0));
+    ctx.beginPath();
+    if (n.kind === "skill") {  // スキルはひし形にして、人と見分ける
+      ctx.moveTo(n.x, n.y - r); ctx.lineTo(n.x + r, n.y); ctx.lineTo(n.x, n.y + r); ctx.lineTo(n.x - r, n.y); ctx.closePath();
+    } else {
+      ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+    }
+    ctx.fillStyle = col; ctx.fill();
+    ctx.shadowBlur = 0;
+    if (isCenter) { ctx.lineWidth = 1.2 / scale; ctx.strokeStyle = THEME.ring; ctx.stroke(); }
+    else if (match && match.rank <= 3 && isOn) { ctx.lineWidth = 1.6 / scale; ctx.strokeStyle = THEME.match; ctx.stroke(); }
+    // ラベル: 拡大するほど浮かび上がる（Obsidianと同じ）。光っている点は常に出す。
+    const zoomAlpha = Math.min(1, Math.max(0, (scale - 1.1) / 1.2));
+    const a = alwaysLabels ? 1 : (lit && lit.has(n.id) ? 1 : zoomAlpha);
+    if (a > 0.02 && isOn) {
+      const fs = Math.max(10 / scale, 2.2);
+      ctx.font = `${isCenter ? 600 : 400} ${fs}px ${FONT}`;
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.globalAlpha = a;
+      ctx.fillStyle = n.kind === "skill" ? THEME.skillLabel : THEME.label;
+      const base = n.kind === "skill" ? n.skill : (n.name ? `${n.name}（${n.id}）` : n.id);
+      const text = match && isOn ? `${match.rank}位 ${base}` : base;
+      ctx.fillText(text, n.x, n.y + r + 2 / scale);
+      if (n.kind === "person" && n.role && (scale > 2.2 || isCenter || alwaysLabels)) {
+        ctx.fillStyle = THEME.subLabel; ctx.font = `${fs * 0.85}px ${FONT}`;
+        ctx.fillText(n.role, n.x, n.y + r + 2 / scale + fs * 1.15);
+      }
+    }
+    ctx.globalAlpha = 1;
+  })
+  .nodePointerAreaPaint((n, col, ctx) => { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(n.x, n.y, radius(n) + 3, 0, 2 * Math.PI); ctx.fill(); })
+  .onNodeHover((n) => { hover = n ? n.id : null; el.style.cursor = n ? "pointer" : "default"; })
+  .onNodeClick((n) => {
+    if (n.kind === "skill") { search(n.skill); return; }
+    // ダブルクリック（同じ点を DOUBLE_CLICK_MS 以内に2回）でスキルシートを開く。図の部品にダブルクリックの通知が無いため、
+    // クリックの間隔で見分ける。1回目ですぐに点へ寄ると、点が動いて2回目が外れるので、寄るのは間隔が過ぎてからにする。
+    const now = Date.now();
+    clearTimeout(flyTimer);
+    if (lastClick.id === n.id && now - lastClick.at < DOUBLE_CLICK_MS) { lastClick = { id: null, at: 0 }; openSheet(n.id); return; }
+    lastClick = { id: n.id, at: now };
+    select(n.id, false);
+    flyTimer = setTimeout(() => flyTo(n.id), DOUBLE_CLICK_MS);
+  })
+  .onBackgroundClick(() => { selected = null; if (matchById) renderMatch(); else closeInfo(); })
+  // 配置は、点が広がって落ち着くまでの動きを見せながら計算し、LAYOUT_COOLDOWN_MS で止める。
+  // 2026-11-18 に先に計算して動きを消したが、2026-11-19 に富田指示で動きを戻した（値は TalentMap の定数）。
+  .warmupTicks(TalentMap.LAYOUT_WARMUP_TICKS)
+  .cooldownTime(TalentMap.LAYOUT_COOLDOWN_MS)
+  .d3VelocityDecay(0.3);
+
+// 力の調整: 近い人ほど短い線、同じグループはゆるく中心へ集まる（島のように見せる）。
+Graph.d3Force("charge").strength((n) => n.kind === "skill" ? -25 : -55).distanceMax(400);
+Graph.d3Force("link").distance((l) => l.kind === "tag" ? 60 : 18 + (1 - l.sim) * 70).strength((l) => l.kind === "tag" ? 0.03 : 0.6);
+function clusterForce(alpha) {
+  const cx = {}, cy = {}, cnt = {};
+  for (const n of clusterForce.nodes) if (n.kind === "person") {
+    cx[n.cluster] = (cx[n.cluster] || 0) + n.x; cy[n.cluster] = (cy[n.cluster] || 0) + n.y; cnt[n.cluster] = (cnt[n.cluster] || 0) + 1;
+  }
+  for (const n of clusterForce.nodes) if (n.kind === "person") {
+    n.vx += (cx[n.cluster] / cnt[n.cluster] - n.x) * 0.08 * alpha;
+    n.vy += (cy[n.cluster] / cnt[n.cluster] - n.y) * 0.08 * alpha;
+  }
+}
+clusterForce.nodes = [];
+clusterForce.initialize = (nodes) => { clusterForce.nodes = nodes; };
+Graph.d3Force("cluster", clusterForce);
+
+function setData() {
+  const links = DATA.links.map((l) => ({ source: l.from, target: l.to, sim: l.sim, common: l.common, kind: "sim" }));
+  if (showHubs) DATA.nodes.forEach((n) => n.tech.filter((s) => hubSet.has(s))
+    .forEach((s) => links.push({ source: n.id, target: "skill:" + s, kind: "tag" })));
+  rebuildNeighbors(links);
+  // 位置を引き継ぐため、点のオブジェクトは使い回す（作り直すと配置が最初からやり直しになる）。
+  Graph.graphData({ nodes: showHubs ? [...people, ...hubNodes] : people, links });
+}
+setData();
+let fitted = false;
+Graph.onEngineStop(() => { if (!fitted) { Graph.zoomToFit(600, 80); fitted = true; } });
+window.addEventListener("resize", () => Graph.width(innerWidth).height(innerHeight));
+
+// ---- 右の詳細カード ----
+// infoCard＝小窓の枠（表示・非表示と幅）、info＝その中のスクロールする中身（書き換えるのはこちら）。
+const infoCard = document.getElementById("info"), info = document.getElementById("infoBody");
+function closeInfo() { infoCard.classList.remove("show"); }
+// 近い人の一覧に出す「なぜ近いか」。グループの分け方ごとに、近さの材料が違う。
+function whyNear(m) {
+  if (mode === "role") return `共通のできること: ${esc(m.shared.join("・") || "なし（ロール・役職のみ）")}`;
+  if (mode === "industry") return `共通の業界: ${esc(m.shared.join("・") || "なし（技術のみ）")}`;
+  return `${m.families.length ? "系統: " + esc(m.families.join("・")) + "　" : ""}` +
+    `共通: ${esc(m.common.join(", ") || (m.families.length ? "なし（同じ系統の別スキル）" : "工程・役職のみ"))}`;
+}
+const chips = (list) => `<div class="chips">` + list.map((s) => `<span class="chip" data-s="${esc(s)}">${esc(s)}</span>`).join("") + `</div>`;
+function select(id, fly) {
+  const n = byId[id]; if (!n) return;
+  selected = id;
+  info.innerHTML = `<button class="close" aria-label="閉じる">×</button>` +
+    `<h2>${esc(n.name || n.id)}</h2><div class="sub">${n.name ? esc(n.id) + "・" : ""}${esc(n.role) || "ロール未設定"}</div>` +
+    (n.skill_sheet ? `<button class="sheet" id="openSheet">スキルシート ↗</button>` : `<div class="nosheet">スキルシートの登録なし</div>`) +
+    `<dl><dt>グループ</dt><dd><span style="color:${color(n.cluster)}">●</span> ${esc(clusterName[n.cluster])}</dd>` +
+    `<dt>レイヤー</dt><dd>${esc(n.layer)}</dd>` +
+    // 所属会社は社内向けだけ（社外向けでは、サーバが列を渡さない）。
+    (EXTERNAL ? "" : `<dt>所属会社</dt><dd>${esc(n.company) || "—"}</dd>`) +
+    `<dt>最も高い役職</dt><dd>${esc(n.top_position) || "—"}</dd><dt>主な役職</dt><dd>${esc(n.main_position) || "—"}</dd>` +
+    `<dt>働き方</dt><dd>${esc(n.work_style) || "—"}</dd><dt>稼働開始</dt><dd>${esc(n.available_from) || "—"}</dd></dl>` +
+    `<div class="sec">スキル</div>${chips(n.tech)}<div class="sec">業務スコープ</div>${chips(n.scopes)}` +
+    `<div class="sec">近い人</div>` + n.neighbors.map((m) => {
+      const o = byId[m.id];
+      return `<button class="nb" data-id="${esc(m.id)}"><b>${esc(o.name || o.id)}</b> <small>${o.name ? esc(o.id) + "・" : ""}${esc(o.role)}</small>` +
+        `<div class="bar" style="width:${Math.round(m.sim * 100)}%"></div><small>近さ${Math.round(m.sim * 100)}％　${whyNear(m)}</small></button>`;
+    }).join("");
+  if (matchById) info.insertAdjacentHTML("beforeend", `<button class="nb" id="backToMatch">← 案件の候補に戻る</button>`);
+  infoCard.classList.add("show");
+  const sheet = document.getElementById("openSheet");
+  if (sheet) sheet.onclick = () => openSheet(id);
+  info.querySelector(".close").onclick = () => { selected = null; if (matchById) renderMatch(); else closeInfo(); };
+  info.querySelectorAll(".nb[data-id]").forEach((b) => b.onclick = () => select(b.dataset.id, true));
+  info.querySelectorAll(".chip").forEach((c) => c.onclick = () => search(c.dataset.s));
+  const back = document.getElementById("backToMatch");
+  if (back) back.onclick = () => { selected = null; renderMatch(); };
+  if (fly) flyTo(id);
+}
+
+// ---- 左の絞り込み（カテゴリ・レイヤー）と、グループの分け方 ----
+// 変えたら、載せる人だけで計算し直して描き直す。検索・グループの選択は外し、貼ってある案件は探し直す。
+function rebuild() {
+  compute();
+  hover = null; selected = null; focusSet = null; activeCluster = null; matchById = null; lastMatch = null;
+  document.getElementById("q").value = "";
+  closeInfo(); setData(); renderGroups(); renderFilters(); renderModes();
+  Graph.d3ReheatSimulation();
+  fitted = false;
+  const text = document.getElementById("pj").value;
+  if (text.trim()) matchProject(text);
+}
+function renderFilters() {
+  const inCategory = (t, c) => !c || t.category === c;
+  document.getElementById("catSeg").innerHTML = [["", "すべて"]].concat(TalentMap.CATEGORIES.map((c) => [c, c])).map(([value, label]) =>
+    `<button data-v="${esc(value)}" class="${category === value ? "on" : ""}">${esc(label)} <small>${ALL.filter((t) => inCategory(t, value)).length}</small></button>`).join("");
+  document.querySelectorAll("#catSeg button").forEach((b) => b.onclick = () => { category = b.dataset.v; rebuild(); });
+  // レイヤーの人数は、選んでいるカテゴリの中での人数。1人もいないレイヤーは出さない。
+  document.getElementById("layerChips").innerHTML = LAYER_LIST.map((layer) => {
+    if (!ALL.some((t) => t.layer === layer)) return "";
+    const count = ALL.filter((t) => t.layer === layer && inCategory(t, category)).length;
+    return `<button class="layer ${layersOn.has(layer) ? "on" : ""} ${count ? "" : "none"}" data-v="${esc(layer)}" title="クリックで載せる・外すを切り替え">${esc(layer)} ${count}</button>`;
+  }).join("");
+  document.querySelectorAll("#layerChips .layer").forEach((b) => b.onclick = () => {
+    if (layersOn.has(b.dataset.v)) layersOn.delete(b.dataset.v); else layersOn.add(b.dataset.v);
+    rebuild();
+  });
+}
+// 業界は「解析結果」タブを読むので、初めて「業界」を押したときにだけ読み込む（図を開くたびに読むと、開くのが遅くなるため）。
+const MODES = [["tech", "技術"], ["role", "ロール・スコープ"], ["industry", "業界"]];
+let industriesLoaded = ALL.some((t) => t.industries.length > 0);
+function renderModes() {
+  const industryOff = !industriesLoaded && !canCallServer;
+  document.getElementById("modeSeg").innerHTML = MODES.map(([value, label]) =>
+    `<button data-v="${value}" class="${mode === value ? "on" : ""}"${value === "industry" && industryOff
+      ? ' disabled title="業界は、Webアプリで開いたときだけ使えます"' : ""}>${label}</button>`).join("");
+  document.querySelectorAll("#modeSeg button").forEach((b) => b.onclick = () => setMode(b.dataset.v));
+}
+function setMode(next) {
+  const modeInfo = document.getElementById("modeInfo");
+  modeInfo.textContent = "";
+  if (next !== "industry" || industriesLoaded) { mode = next; rebuild(); return; }
+  modeInfo.textContent = "業界を読み込み中…（数秒かかります）";
+  google.script.run
+    .withSuccessHandler((res) => {
+      if (!res || res.error) { modeInfo.textContent = (res && res.error) || "業界を読み込めませんでした。"; return; }
+      ALL.forEach((t) => { t.industries = TalentMap.parseIndustries(res.industries[t.id]); });
+      industriesLoaded = true; modeInfo.textContent = ""; mode = "industry"; rebuild();
+    })
+    .withFailureHandler((err) => { modeInfo.textContent = "業界を読み込めませんでした: " + (err && err.message || err); })
+    .talentMapIndustries();
+}
+
+// ---- 小窓の幅（左の小窓は右端、右の小窓は左端のつまみをドラッグ） ----
+// 幅はブラウザに覚えさせる（覚えられない設定のブラウザでも、その場の幅の変更は効く）。スマホの幅では変えない。
+const PANEL_MIN_WIDTH = 220, PANEL_MAX_RATIO = 0.6;
+function setupGrip(cardId, direction, storageKey) {
+  const card = document.getElementById(cardId), grip = card.querySelector(".grip");
+  const apply = (w) => { card.style.width = Math.round(Math.min(Math.max(w, PANEL_MIN_WIDTH), innerWidth * PANEL_MAX_RATIO)) + "px"; };
+  if (innerWidth > 760) { try { const saved = Number(localStorage.getItem(storageKey)); if (saved) apply(saved); } catch (e) {} }
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId); grip.classList.add("drag");
+    const startX = e.clientX, startWidth = card.getBoundingClientRect().width;
+    const move = (ev) => apply(startWidth + (ev.clientX - startX) * direction);
+    const up = () => {
+      grip.classList.remove("drag");
+      ["pointermove", "pointerup", "pointercancel"].forEach((type) => grip.removeEventListener(type, type === "pointermove" ? move : up));
+      try { localStorage.setItem(storageKey, String(Math.round(card.getBoundingClientRect().width))); } catch (e) {}
+    };
+    grip.addEventListener("pointermove", move); grip.addEventListener("pointerup", up); grip.addEventListener("pointercancel", up);
+  });
+}
+setupGrip("ctrl", 1, "talentMap.ctrlWidth");
+setupGrip("info", -1, "talentMap.infoWidth");
+
+// ---- 左のグループ一覧・検索 ----
+let activeCluster = null;
+function renderGroups() {
+  document.getElementById("groups").innerHTML = DATA.clusters.map((c) =>
+    `<button class="grp ${activeCluster === c.id ? "on" : ""}" data-c="${c.id}"><span class="dot" style="background:${color(c.id)};box-shadow:0 0 6px ${color(c.id)}"></span>${esc(c.name)}<span class="n">${c.size}</span></button>`).join("");
+  document.querySelectorAll(".grp").forEach((b) => b.onclick = () => {
+    const c = Number(b.dataset.c);
+    activeCluster = activeCluster === c ? null : c;
+    selected = null; closeInfo(); clearMatch();
+    document.getElementById("q").value = "";
+    focusOn(activeCluster === null ? null : DATA.nodes.filter((n) => n.cluster === c).map((n) => n.id));
+    renderGroups();
+  });
+}
+function focusOn(ids) {
+  focusSet = ids && ids.length ? new Set(ids) : null;
+  if (focusSet) Graph.zoomToFit(700, 120, (n) => focusSet.has(n.id));
+  else Graph.zoomToFit(700, 80);
+}
+function search(q) {
+  const box = document.getElementById("q");
+  if (box.value !== q) box.value = q;
+  const s = q.trim().toLowerCase();
+  activeCluster = null; renderGroups(); selected = null; closeInfo(); clearMatch();
+  if (!s) { focusOn(null); return; }
+  const hits = DATA.nodes.filter((n) =>
+    n.id.toLowerCase() === s || (n.name && n.name.toLowerCase().includes(s)) || n.role.toLowerCase().includes(s) ||
+    n.tech.some((t) => t.toLowerCase() === s) || n.scopes.some((t) => t.toLowerCase() === s) ||
+    n.main_position.toLowerCase().includes(s)).map((n) => n.id);
+  if (hits.length === 1) { focusSet = null; select(hits[0], true); return; }
+  focusOn(hits);
+}
+
+// ---- 案件から探す ----
+const MATCH_MAX = 15;       // 光らせる・一覧に出す人数の上限
+const MATCH_MIN_SCORE = 0.2; // これ未満の人は出さない（ほとんど当たっていないため）
+let lastMatch = null;
+let pickedProject = null;  // DB_projectから選んだ案件（手で貼ったときは null）
+function clearMatch() {
+  matchById = null; lastMatch = null; pickedProject = null;
+  document.getElementById("pj").value = "";
+  document.getElementById("pjInfo").innerHTML = "";
+}
+function matchProject(text) {
+  const pjInfo = document.getElementById("pjInfo");
+  if (!text.trim()) { clearMatch(); selected = null; closeInfo(); focusOn(null); return; }
+  const m = TalentMap.matchProject(DATA.nodes, text);
+  m.results = m.results.filter((r) => r.score >= MATCH_MIN_SCORE).slice(0, MATCH_MAX);
+  lastMatch = m;
+  activeCluster = null; renderGroups(); selected = null;
+  document.getElementById("q").value = "";
+  if (!m.skills.length && !m.scopes.length && !m.roles.length) {
+    matchById = null; closeInfo(); focusOn(null);
+    pjInfo.textContent = "スキルを読み取れませんでした。スキル名をカンマで区切って入れてみてください。";
+    return;
+  }
+  // 役職は、区分の名前（「PdM・PM」「テックリード・PL」など）で出す。
+  const requiredAll = m.required.concat(m.requiredRoles);
+  const otherAll = m.skills.filter((sk) => !m.required.includes(sk)).concat(m.scopes, m.roles.filter((r) => !m.requiredRoles.includes(r)));
+  pjInfo.innerHTML = (pickedProject ? `<div>選んだ案件: ${esc(pickedProject.subject || "（件名なし）")}</div>` : "") +
+    (requiredAll.length ? `必須 ` + chips(requiredAll) : "") +
+    (otherAll.length ? (requiredAll.length ? `そのほか ` : `読み取ったスキル `) + chips(otherAll) : "") +
+    `<button class="clear" id="pjClear">クリア</button>`;
+  document.getElementById("pjClear").onclick = () => { clearMatch(); selected = null; closeInfo(); focusOn(null); };
+  matchById = new Map(m.results.map((r, i) => [r.id, { rank: i + 1, score: r.score }]));
+  focusOn(m.results.map((r) => r.id));
+  renderMatch();
+}
+function renderMatch() {
+  const m = lastMatch; if (!m) { closeInfo(); return; }
+  info.innerHTML = `<h2>案件に近い人</h2><div class="sub">${m.results.length ? `上位${m.results.length}名` : "当てはまる人がいません"}` +
+    `（同じスキル＝満点、同じ系統の別スキル＝半分。必須があれば、必須7割・そのほか3割` +
+    (m.roles.length ? `。役職は、区分が一致した人だけ「あり」` : "") + `）</div>` +
+    m.results.map((r, i) => {
+      const o = byId[r.id];
+      const near = r.near.map((x) => `${x.skill}（${x.via}で代替）`);
+      const lackRequired = r.missingRequired.concat(r.missingRequiredRoles);
+      const lackOther = r.missing.filter((sk) => !r.missingRequired.includes(sk))
+        .concat(r.missingRoles.filter((x) => !r.missingRequiredRoles.includes(x)));
+      return `<button class="nb" data-id="${esc(r.id)}"><span class="rank">${i + 1}</span><b>${esc(o.name || o.id)}</b> ` +
+        `<small>${o.name ? esc(o.id) + "・" : ""}${esc(o.role)}</small>` +
+        `<div class="bar" style="width:${Math.round(r.score * 100)}%;background:var(--match)"></div>` +
+        `<small>近さ${Math.round(r.score * 100)}％　あり: ${esc(r.exact.concat(r.scopes, r.roles).join(", ") || "なし")}` +
+        (near.length ? `<br><span class="near">近い経験: ${esc(near.join(", "))}</span>` : "") +
+        (lackRequired.length ? `<br><span class="lack">必須でなし: ${esc(lackRequired.join(", "))}</span>` : "") +
+        (lackOther.length ? `<br><span class="near">なし: ${esc(lackOther.join(", "))}</span>` : "") +
+        `</small></button>`;
+    }).join("");
+  infoCard.classList.add("show");
+  info.querySelectorAll(".nb[data-id]").forEach((b) => b.onclick = () => select(b.dataset.id, true));
+}
+let pjTimer;
+document.getElementById("pj").addEventListener("input", (e) => {
+  pickedProject = null;  // 手で書き換えたら、選んだ案件の表示は外す
+  clearTimeout(pjTimer); pjTimer = setTimeout(() => matchProject(e.target.value), 400);
+});
+
+// ---- DB_project の案件を選ぶ（Webアプリで開いたときだけ。CSVから作ったHTMLではシートを読めないので出さない） ----
+const PROJECT_LIST_MAX = 50;  // 一覧に出す件数の上限（絞り込んで探す前提）
+let projects = null;
+const canLoadProjects = canCallServer && !EXTERNAL;
+const pjPick = document.getElementById("pjPick"), pjList = document.getElementById("pjList");
+if (canLoadProjects) pjPick.hidden = false;
+function renderProjects() {
+  const q = document.getElementById("pjFilter").value.trim().toLowerCase();
+  const hits = projects.filter((p) => !q || [p.subject, p.company, p.role, p.skill].some((v) => v.toLowerCase().includes(q)));
+  const items = document.getElementById("pjItems");
+  items.innerHTML = hits.slice(0, PROJECT_LIST_MAX).map((p) =>
+    `<button class="pj" data-row="${p.row}">${esc(p.subject || p.role || "（件名なし）")}<br>` +
+    `<small>${esc([p.date, p.company, p.skill].filter((v) => v).join("・").slice(0, 80))}</small></button>`).join("") +
+    `<div class="note">${hits.length ? `${hits.length}件中 ${Math.min(hits.length, PROJECT_LIST_MAX)}件を表示（募集中の案件）` : "当てはまる案件がありません"}</div>`;
+  items.querySelectorAll(".pj").forEach((b) => b.onclick = () => {
+    const p = projects.find((x) => String(x.row) === b.dataset.row);
+    const text = [p.subject, p.role, p.skill, p.text].filter((v) => v).join("\n");
+    document.getElementById("pj").value = text;
+    pjList.hidden = true;
+    pickedProject = p;
+    matchProject(text);
+  });
+}
+pjPick.onclick = () => {
+  if (projects) { pjList.hidden = !pjList.hidden; if (!pjList.hidden) renderProjects(); return; }
+  pjPick.disabled = true; pjPick.textContent = "DB_projectを読み込み中…";
+  const done = (label) => { pjPick.disabled = false; pjPick.textContent = label; };
+  google.script.run
+    .withSuccessHandler((res) => {
+      if (!res || res.error) { done("DB_projectから選ぶ"); document.getElementById("pjInfo").textContent = (res && res.error) || "読み込めませんでした。"; return; }
+      projects = res.projects; done("DB_projectから選ぶ");
+      pjList.hidden = false; renderProjects();
+    })
+    .withFailureHandler((err) => { done("DB_projectから選ぶ"); document.getElementById("pjInfo").textContent = "読み込めませんでした: " + (err && err.message || err); })
+    .talentMapProjects();
+};
+document.getElementById("pjFilter").addEventListener("input", renderProjects);
+
+let timer;
+document.getElementById("q").addEventListener("input", (e) => { clearTimeout(timer); timer = setTimeout(() => search(e.target.value), 250); });
+document.getElementById("hubs").addEventListener("change", (e) => { showHubs = e.target.checked; setData(); });
+document.getElementById("labels").addEventListener("change", (e) => { alwaysLabels = e.target.checked; });
+renderGroups(); renderFilters(); renderModes();
+// 図を開いたままPCの表示設定（ダーク／ライト）を変えたときも、図の中の色を合わせる（小窓はCSSが自動で切り替わる）。
+if (lightQuery) {
+  const onTheme = () => {
+    THEME = THEMES[lightQuery.matches ? "light" : "dark"];
+    Graph.backgroundColor(THEME.bg);
+    Graph.linkColor(Graph.linkColor());  // 線の色を引き直させる
+    renderGroups();
+    if (selected) select(selected, false);
+  };
+  if (lightQuery.addEventListener) lightQuery.addEventListener("change", onTheme); else if (lightQuery.addListener) lightQuery.addListener(onTheme);
+}
+</script>
+<script>
+(function () {
+  const API = "https://script.google.com/macros/s/AKfycbzw4sm4ql9DA8rP8_4h-wFSaNE3hnhbwlacTQuUUh28Sgtxf-qFYAFzupBXa6FBUYzL/exec";
+  const note = (text) => {
+    let el = document.getElementById("loadNote");
+    if (!el) {
+      el = document.createElement("div"); el.id = "loadNote";
+      el.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;font:14px/1.7 sans-serif;color:#999;pointer-events:none;z-index:9";
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+  };
+  const getJson = (format) => fetch(API + "?format=" + format).then((res) => {
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  });
+  const makeRun = () => {
+    const h = { ok: () => {}, ng: () => {} };
+    const run = {
+      withSuccessHandler(f) { h.ok = f; return run; },
+      withFailureHandler(f) { h.ng = f; return run; },
+      talentMapIndustries() { getJson("industries").then(h.ok, h.ng); },
+      talentMapProjects() { h.ng(new Error("この画面では、案件の一覧は使えません。")); },
+    };
+    return run;
+  };
+  window.google = { script: {} };
+  Object.defineProperty(window.google.script, "run", { get: makeRun });
+  note("人材データを読み込み中…（数秒かかります）");
+  getJson("json").then((data) => {
+    if (!data || data.error || !Array.isArray(data.rows)) throw new Error((data && data.error) || "データの形が違います");
+    window.__TALENT_DATA__ = data;
+    const s = document.createElement("script");
+    s.textContent = document.getElementById("talent-map-main").textContent;
+    document.body.appendChild(s);
+    const el = document.getElementById("loadNote"); if (el) el.remove();
+  }).catch((err) => {
+    note("人材データを読み込めませんでした。時間をおいて、ページを再読み込みしてください。（" + (err && err.message || err) + "）");
+  });
+})();
+</script>
+</body>
+</html>
